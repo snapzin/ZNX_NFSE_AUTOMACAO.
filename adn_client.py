@@ -248,12 +248,26 @@ class ResultadoADN:
     eventos_ignorados: int = 0      # eventos nao-cancelamento (substituicao etc.)
     nao_classificados: int = 0      # notas sem dono claro (raro)
     ultimo_nsu: int = 0
+    nsus_vistos: set = field(default_factory=set)  # todos os NSU retornados pelo ADN
     arquivos: list[Path] = field(default_factory=list)
     erro: str = ""
 
     @property
     def total_salvo(self) -> int:
         return self.emitidas + self.recebidas + self.canceladas
+
+    @property
+    def nsus_faltando(self) -> list:
+        """NSU que faltam NO MEIO da sequencia recebida (buracos do ADN). A caixa
+        do ADN e sequencial — um buraco indica documento que nao veio."""
+        if not self.nsus_vistos:
+            return []
+        lo, hi = min(self.nsus_vistos), max(self.nsus_vistos)
+        return [n for n in range(lo, hi + 1) if n not in self.nsus_vistos]
+
+    @property
+    def caixa_completa(self) -> bool:
+        return not self.nsus_faltando
 
 
 def _fetch_lote(
@@ -394,6 +408,7 @@ def baixar_dfe(
             except (TypeError, ValueError):
                 nsu = res.ultimo_nsu
             res.ultimo_nsu = max(res.ultimo_nsu, nsu)
+            res.nsus_vistos.add(nsu)  # registra todo NSU para a conferencia de completude
 
             arquivo_b64 = d.get("ArquivoXml")
             if not arquivo_b64:

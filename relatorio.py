@@ -190,14 +190,26 @@ def _escrever_aba(ws, titulo: str, linhas: list[LinhaNota]) -> dict:
 class ResumoCliente:
     nome: str = ""
     cnpj: str = ""
-    totais: dict = field(default_factory=dict)  # tipo -> {qtd, valor_servico, ...}
+    totais: dict = field(default_factory=dict)   # tipo -> {qtd, valor_servico, ...}
+    conferencia: dict = field(default_factory=dict)  # {total_caixa, recebidos, faltando, completo}
 
 
-def gerar_excel_cliente(pasta_cliente: Path, nome_cliente: str, cnpj: str = "") -> ResumoCliente | None:
+def _veredito(conf: dict) -> tuple[str, str]:
+    """Texto e cor do veredito de completude a partir da conferencia por NSU."""
+    if not conf:
+        return "—", "808080"
+    if conf.get("completo", True):
+        return "BATEU — caixa completa, sem notas faltando", "1E7D34"  # verde
+    faltam = conf.get("faltando") or []
+    return f"NAO BATEU — faltam {len(faltam)} NSU: {', '.join(map(str, faltam[:20]))}", "C00000"  # vermelho
+
+
+def gerar_excel_cliente(pasta_cliente: Path, nome_cliente: str, cnpj: str = "",
+                        conferencia: dict | None = None) -> ResumoCliente | None:
     """Gera o Excel de conferencia de UM cliente. Retorna o resumo (totais por
     tipo) ou None se nao houver nenhuma nota."""
     pasta_cliente = Path(pasta_cliente)
-    resumo = ResumoCliente(nome=nome_cliente, cnpj=cnpj)
+    resumo = ResumoCliente(nome=nome_cliente, cnpj=cnpj, conferencia=conferencia or {})
     wb = Workbook()
     wb.remove(wb.active)
 
@@ -246,6 +258,21 @@ def gerar_excel_cliente(pasta_cliente: Path, nome_cliente: str, cnpj: str = "") 
     for ci, larg in enumerate((14, 8, 16, 14, 14, 16), start=1):
         ws.column_dimensions[get_column_letter(ci)].width = larg
 
+    # Bloco de CONFERENCIA (completude por NSU) — o veredito BATEU / NAO BATEU
+    if resumo.conferencia:
+        conf = resumo.conferencia
+        ws.append([])
+        ws.append(["Conferencia (completude por NSU)"])
+        ws.cell(row=ws.max_row, column=1).font = Font(bold=True, size=12)
+        ws.append(["Total de documentos no ADN", conf.get("total_caixa", 0)])
+        ws.append(["Documentos recebidos", conf.get("recebidos", 0)])
+        ws.append(["NSU faltando", len(conf.get("faltando") or [])])
+        texto, cor = _veredito(conf)
+        ws.append([texto])
+        cell = ws.cell(row=ws.max_row, column=1)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor=cor)
+
     destino = pasta_cliente / f"_Relatorio_{_sanitizar(nome_cliente)}.xlsx"
     try:
         wb.save(destino)
@@ -270,7 +297,7 @@ def gerar_consolidado(base_saida: Path, resumos: list[ResumoCliente]) -> Path | 
 
     cab = ["Cliente", "CNPJ",
            "Emit Qtd", "Emit Valor", "Receb Qtd", "Receb Valor",
-           "Canc Qtd", "Canc Valor", "Total Notas", "Total Servico"]
+           "Canc Qtd", "Canc Valor", "Total Notas", "Total Servico", "Conferencia"]
     ws.append(cab)
     hr = ws.max_row
     for ci in range(1, len(cab) + 1):
@@ -281,6 +308,7 @@ def gerar_consolidado(base_saida: Path, resumos: list[ResumoCliente]) -> Path | 
         return (r.totais.get(tipo) or {}).get(campo, 0)
 
     soma = {"qtd": 0, "serv": 0.0}
+    divergentes = 0
     for r in sorted(resumos, key=lambda x: x.nome.lower()):
         e_q, e_v = _g(r, "Emitidas", "qtd"), _g(r, "Emitidas", "valor_servico")
         r_q, r_v = _g(r, "Recebidas", "qtd"), _g(r, "Recebidas", "valor_servico")
@@ -289,9 +317,18 @@ def gerar_consolidado(base_saida: Path, resumos: list[ResumoCliente]) -> Path | 
         tot_v = e_v + r_v + c_v
         soma["qtd"] += tot_q
         soma["serv"] += tot_v
-        ws.append([r.nome, r.cnpj, e_q, e_v, r_q, r_v, c_q, c_v, tot_q, tot_v])
+        completo = (r.conferencia or {}).get("completo", True)
+        falt = len((r.conferencia or {}).get("faltando") or [])
+        verdito = "BATEU" if completo else f"NAO BATEU ({falt} NSU)"
+        if not completo:
+            divergentes += 1
+        ws.append([r.nome, r.cnpj, e_q, e_v, r_q, r_v, c_q, c_v, tot_q, tot_v, verdito])
+        cv = ws.cell(row=ws.max_row, column=len(cab))
+        cv.font = Font(bold=True, color="FFFFFF")
+        cv.fill = PatternFill("solid", fgColor=("1E7D34" if completo else "C00000"))
 
-    ws.append(["TOTAL GERAL", "", "", "", "", "", "", "", soma["qtd"], soma["serv"]])
+    ws.append(["TOTAL GERAL", "", "", "", "", "", "", "", soma["qtd"], soma["serv"],
+               "TODOS OK" if divergentes == 0 else f"{divergentes} divergente(s)"])
     rt = ws.max_row
     for ci in range(1, len(cab) + 1):
         ws.cell(row=rt, column=ci).fill = _TOT_FILL
@@ -300,7 +337,7 @@ def gerar_consolidado(base_saida: Path, resumos: list[ResumoCliente]) -> Path | 
     for r in range(hr + 1, ws.max_row + 1):
         for ci in (4, 6, 8, 10):
             ws.cell(row=r, column=ci).number_format = "#,##0.00"
-    for ci, larg in enumerate((34, 18, 9, 14, 9, 14, 9, 14, 12, 16), start=1):
+    for ci, larg in enumerate((34, 18, 9, 14, 9, 14, 9, 14, 12, 16, 22), start=1):
         ws.column_dimensions[get_column_letter(ci)].width = larg
     ws.freeze_panes = "A4"
 

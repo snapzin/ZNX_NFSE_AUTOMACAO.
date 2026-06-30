@@ -82,6 +82,8 @@ class ResultadoCNPJ:
     thumbprint: str = ""
     erro: str = ""
     importado_dominio: bool = False
+    # Conferencia de completude por NSU: {total_caixa, recebidos, faltando, completo}
+    conferencia: dict = field(default_factory=dict)
 
     @property
     def notas_encontradas(self) -> int:
@@ -112,8 +114,8 @@ class NFSeRunner:
         cliente: Cliente,
         cert: CertificadoInfo,
         params: Parametros,
-    ) -> tuple[int, str, int, str]:
-        """Retorna (notas_emitidas, arquivo_emitidas, notas_recebidas, arquivo_recebidas)."""
+    ) -> tuple[int, str, int, str, dict]:
+        """Retorna (emitidas, arq_emitidas, recebidas, arq_recebidas, conferencia)."""
         _check_cancel(self.cancel_event, f"[{cliente.cnpj}] Execucao cancelada antes do download.")
         output_dir = self.base_output / _sanitizar_nome_pasta(cliente.nome)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -188,10 +190,10 @@ def _baixar_cliente_adn(
     params: Parametros,
     output_dir: Path,
     cancel_event: threading.Event | None = None,
-) -> tuple[int, str, int, str]:
+) -> tuple[int, str, int, str, dict]:
     """Baixa os DF-e do cliente direto da API ADN (mTLS) e salva em
     output_dir/<Tipo>/. Retorna (n_emitidas, arq_emitidas, n_recebidas,
-    arq_recebidas) no mesmo contrato de processar_cliente."""
+    arq_recebidas, conferencia)."""
     import adn_client
 
     competencias = _competencias_no_periodo(params.data_inicio, params.data_fim) or None
@@ -213,15 +215,24 @@ def _baixar_cliente_adn(
     if res.erro:
         raise RuntimeError(f"Falha na API ADN: {res.erro}")
 
+    faltando = res.nsus_faltando
+    conferencia = {
+        "total_caixa": res.ultimo_nsu,
+        "recebidos": len(res.nsus_vistos),
+        "faltando": faltando,
+        "completo": res.caixa_completa,
+    }
     log.info(
         "[%s] ADN concluido: %d emitidas, %d recebidas, %d canceladas "
-        "(ultimo NSU %d; %d fora da competencia).",
+        "(ultimo NSU %d; %d fora da competencia). Conferencia: %s",
         cliente.cnpj, res.emitidas, res.recebidas, res.canceladas,
         res.ultimo_nsu, res.ignorados_competencia,
+        "OK (caixa completa)" if res.caixa_completa
+        else f"FALTAM {len(faltando)} NSU: {faltando[:10]}",
     )
     arq_emit = str(output_dir / "Emitidas") if res.emitidas else ""
     arq_rec = str(output_dir / "Recebidas") if res.recebidas else ""
-    return res.emitidas, arq_emit, res.recebidas, arq_rec
+    return res.emitidas, arq_emit, res.recebidas, arq_rec, conferencia
 
 
 def preparar_parametros(
@@ -505,7 +516,7 @@ def executar_local(
             nome = cert.nome_amigavel or cnpj
 
         try:
-            ne, ae, nr, ar = runner.processar_cliente(Cliente(cnpj=cnpj, nome=nome), cert, params)
+            ne, ae, nr, ar, conf = runner.processar_cliente(Cliente(cnpj=cnpj, nome=nome), cert, params)
             resultados.append(
                 ResultadoCNPJ(
                     cnpj=cnpj,
@@ -516,6 +527,7 @@ def executar_local(
                     notas_recebidas=nr,
                     arquivo_recebidas=ar,
                     thumbprint=cert.thumbprint_sha1,
+                    conferencia=conf,
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -561,7 +573,7 @@ def _gerar_relatorios(resultados: list[ResultadoCNPJ]) -> None:
         if not pasta.is_dir():
             continue
         try:
-            resumo = relatorio.gerar_excel_cliente(pasta, r.nome, r.cnpj)
+            resumo = relatorio.gerar_excel_cliente(pasta, r.nome, r.cnpj, r.conferencia)
             if resumo:
                 resumos.append(resumo)
         except Exception as exc:  # noqa: BLE001
