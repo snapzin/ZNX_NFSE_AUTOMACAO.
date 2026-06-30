@@ -59,6 +59,9 @@ def default_values() -> dict[str, object]:
         # Pausa (segundos) entre um cliente e o proximo, para nao bater no
         # rate-limit (HTTP 429) da API oficial. 0 desliga.
         "ADN_INTERVALO_CLIENTES_S": 1.5,
+        # Gera os Excel de conferencia (por cliente + consolidado) com os
+        # valores das notas baixadas, ao fim da execucao.
+        "GERAR_RELATORIO": True,
 
         # Seletores com fallback conhecido. Os demais ficam opcionais.
         "NFSE_SELECTOR_LOGIN_OK": "",

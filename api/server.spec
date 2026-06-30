@@ -41,7 +41,7 @@ hiddenimports += [
     "h11", "h11._readers", "h11._writers",
     "email.mime.multipart", "email.mime.text",
     "nfse_automacao", "cert_reader", "dominio_importer", "config_defaults",
-    "adn_client",
+    "adn_client", "relatorio",
     "path_finder", "runtime_settings",
 ]
 

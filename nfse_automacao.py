@@ -532,11 +532,46 @@ def executar_local(
                 )
             )
 
-    # Fase 2: importar XMLs no Domínio Web (empresa por empresa)
+    # Fase 2: relatorio de conferencia (Excel por cliente + consolidado)
+    if bool(getattr(config, "GERAR_RELATORIO", True)):
+        _gerar_relatorios(resultados)
+
+    # Fase 3: importar XMLs no Domínio Web (empresa por empresa)
     if bool(getattr(config, "DOMINIO_WEB_IMPORTAR", False)):
         _importar_dominio_web(resultados, cancel_event)
 
     return resultados
+
+
+def _gerar_relatorios(resultados: list[ResultadoCNPJ]) -> None:
+    """Gera o Excel de conferencia de cada cliente (com notas) e o consolidado,
+    a partir dos XMLs ja salvos em PASTA_SAIDA/<Cliente>/."""
+    try:
+        import relatorio
+    except ImportError:
+        log.warning("Modulo de relatorio nao encontrado — relatorio ignorado.")
+        return
+
+    base = Path(config.PASTA_SAIDA)
+    resumos = []
+    for r in resultados:
+        if r.status != "ok" or r.notas_encontradas == 0:
+            continue
+        pasta = base / _sanitizar_nome_pasta(r.nome)
+        if not pasta.is_dir():
+            continue
+        try:
+            resumo = relatorio.gerar_excel_cliente(pasta, r.nome, r.cnpj)
+            if resumo:
+                resumos.append(resumo)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[%s] Falha ao gerar relatorio: %s", r.cnpj, exc)
+
+    if resumos:
+        try:
+            relatorio.gerar_consolidado(base, resumos)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Falha ao gerar relatorio consolidado: %s", exc)
 
 
 def _importar_dominio_web(
