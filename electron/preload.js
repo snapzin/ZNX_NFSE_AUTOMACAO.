@@ -11,4 +11,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('license-deactivate'),
   selectFolder: () =>
     ipcRenderer.invoke('select-folder'),
+  selectFile: () =>
+    ipcRenderer.invoke('select-file'),
 });

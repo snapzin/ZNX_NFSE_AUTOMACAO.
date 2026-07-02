@@ -226,6 +226,14 @@ ipcMain.handle('select-folder', async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
+ipcMain.handle('select-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [{ name: 'Planilhas', extensions: ['xlsx', 'xlsm', 'xls'] }],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
 ipcMain.handle('api-call', async (event, method, endpoint, body) => {
   try {
     const headers = {

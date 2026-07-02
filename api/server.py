@@ -575,8 +575,13 @@ def _normalizar_clientes(clientes) -> list[dict]:
             continue
         doc = re.sub(r"\D", "", str(c.get("documento", "")).strip())[:32]
         nome = str(c.get("nome", "")).strip()[:200]
+        # 'ativo' controla quais clientes entram na execucao (checkbox na tela).
+        # Ausente = True (retrocompatibilidade: tudo ativo por padrao).
+        ativo = c.get("ativo", True)
+        if isinstance(ativo, str):
+            ativo = ativo.strip().lower() not in ("nao", "não", "false", "0", "n", "")
         if doc or nome:
-            out.append({"documento": doc, "nome": nome})
+            out.append({"documento": doc, "nome": nome, "ativo": bool(ativo)})
     return out
 
 
@@ -600,6 +605,8 @@ def _ler_clientes_local() -> dict:
                     if "cnpj" in h or "cpf" in h or "doc" in h), 0)
     idx_nome = next((i for i, h in enumerate(header)
                      if "nome" in h or "razao" in h or "cliente" in h), 1)
+    idx_ativo = next((i for i, h in enumerate(header)
+                      if "ativo" in h or "selec" in h), None)
 
     clientes = []
     for row in rows[1:]:
@@ -607,8 +614,11 @@ def _ler_clientes_local() -> dict:
             continue
         doc = str(row[idx_doc] or "").strip() if idx_doc < len(row) else ""
         nome = str(row[idx_nome] or "").strip() if idx_nome < len(row) else ""
+        ativo = True
+        if idx_ativo is not None and idx_ativo < len(row):
+            ativo = str(row[idx_ativo] or "").strip().lower() not in ("nao", "não", "false", "0", "n", "")
         if doc or nome:
-            clientes.append({"documento": doc, "nome": nome})
+            clientes.append({"documento": doc, "nome": nome, "ativo": ativo})
 
     return {"clientes": _normalizar_clientes(clientes), "path": str(xlsx_path), "source": "local"}
 
@@ -622,9 +632,10 @@ def _salvar_clientes_local(clientes: list[dict]) -> dict:
     wb = Workbook()
     ws = wb.active
     ws.title = "Clientes"
-    ws.append(["CNPJ", "NOME"])
+    ws.append(["CNPJ", "NOME", "ATIVO"])
     for c in clientes:
-        ws.append([c.get("documento", ""), c.get("nome", "")])
+        ativo = "Sim" if c.get("ativo", True) else "Nao"
+        ws.append([c.get("documento", ""), c.get("nome", ""), ativo])
     wb.save(xlsx_path)
     wb.close()
 
@@ -804,6 +815,56 @@ async def salvar_clientes(request: Request, payload: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _parse_xlsx_clientes(path: Path) -> list[dict]:
+    """Le um XLSX arbitrario (colunas CNPJ/CPF + Nome; ATIVO opcional) e devolve
+    a lista normalizada de clientes. Detecta as colunas pelo cabecalho."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=1, values_only=True))
+    wb.close()
+    if not rows:
+        return []
+    header = [str(c or "").strip().lower() for c in rows[0]]
+    idx_doc = next((i for i, h in enumerate(header)
+                    if "cnpj" in h or "cpf" in h or "doc" in h), 0)
+    idx_nome = next((i for i, h in enumerate(header)
+                     if "nome" in h or "razao" in h or "cliente" in h), 1)
+    idx_ativo = next((i for i, h in enumerate(header)
+                      if "ativo" in h or "selec" in h), None)
+    clientes = []
+    for row in rows[1:]:
+        if not row or all(c is None or str(c).strip() == "" for c in row):
+            continue
+        doc = str(row[idx_doc] or "").strip() if idx_doc < len(row) else ""
+        nome = str(row[idx_nome] or "").strip() if idx_nome < len(row) else ""
+        ativo = True
+        if idx_ativo is not None and idx_ativo < len(row):
+            ativo = str(row[idx_ativo] or "").strip().lower() not in ("nao", "não", "false", "0", "n", "")
+        if doc or nome:
+            clientes.append({"documento": doc, "nome": nome, "ativo": ativo})
+    return _normalizar_clientes(clientes)
+
+
+@app.post("/clientes/importar")
+async def importar_clientes(payload: dict):
+    """Le um XLSX (CNPJ/CPF + Nome) do caminho informado e DEVOLVE os clientes
+    (nao salva — o frontend mescla com a lista e o usuario clica em Salvar)."""
+    caminho = str(payload.get("path") or "").strip()
+    if not caminho:
+        raise HTTPException(status_code=400, detail="Caminho do arquivo nao informado.")
+    p = Path(caminho)
+    if not p.exists():
+        raise HTTPException(status_code=404, detail=f"Arquivo nao encontrado: {caminho}")
+    try:
+        clientes = _parse_xlsx_clientes(p)
+    except Exception as e:
+        logger.exception("Falha ao importar clientes")
+        raise HTTPException(status_code=500, detail=f"Falha ao ler a planilha: {e}")
+    return {"ok": True, "clientes": clientes, "total": len(clientes)}
+
+
 @app.get("/license/status")
 async def license_status():
     """Endpoint legado: licença agora é validada no Electron contra a Vercel."""
@@ -844,8 +905,18 @@ async def start_execution(request: Request, body: dict):
 
         # Clientes da aba Clientes (servidor por maquina / XLSX local). Quando
         # ha clientes cadastrados, a execucao processa SO eles — em vez de
-        # varrer todos os certificados da pasta.
-        clientes_exec = _clientes_atuais(request.headers.get("x-license-key", ""))
+        # varrer todos os certificados da pasta. Apenas os marcados como ATIVO
+        # (checkbox na tela) entram; se nenhum estiver ativo, cai no
+        # comportamento antigo (todos os certificados).
+        todos_clientes = _clientes_atuais(request.headers.get("x-license-key", ""))
+        clientes_exec = [c for c in todos_clientes if c.get("ativo", True)]
+        # Se HA clientes cadastrados mas NENHUM ativo, nao roda (evita cair no
+        # fallback de varrer TODOS os certificados sem querer).
+        if todos_clientes and not clientes_exec:
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhum cliente selecionado. Marque ao menos um cliente na aba Clientes.",
+            )
 
         job_id = str(uuid.uuid4())[:8]
         job = Job(id=job_id, status="running")
@@ -881,6 +952,8 @@ async def start_execution(request: Request, body: dict):
         job.thread.start()
 
         return {"jobId": job_id}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Falha ao iniciar execução")
         raise HTTPException(status_code=500, detail=str(e))

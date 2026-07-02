@@ -1185,7 +1185,7 @@ function ClientesPage({ api, toast }) {
   };
 
   const adicionar = () => {
-    setClientes((cs) => [...cs, { documento: '', nome: '' }]);
+    setClientes((cs) => [...cs, { documento: '', nome: '', ativo: true }]);
   };
 
   const remover = (idx) => {
@@ -1196,6 +1196,35 @@ function ClientesPage({ api, toast }) {
     setClientes((cs) => cs.map((c, i) => (i === idx ? { ...c, [campo]: valor } : c)));
   };
 
+  const marcarTodos = (ativo) => {
+    setClientes((cs) => cs.map((c) => ({ ...c, ativo })));
+  };
+
+  const importar = async () => {
+    try {
+      const path = await window.electronAPI?.selectFile?.();
+      if (!path) return;
+      const res = await api.post('/clientes/importar', { path });
+      const novos = res?.clientes || [];
+      if (novos.length === 0) {
+        toast('Nenhum cliente encontrado na planilha.', 'warning');
+        return;
+      }
+      setClientes((cs) => {
+        const existentes = new Set(
+          cs.map((c) => String(c.documento || '').replace(/\D/g, '')).filter(Boolean),
+        );
+        const adicionados = novos.filter(
+          (c) => !existentes.has(String(c.documento || '').replace(/\D/g, '')),
+        );
+        return [...cs, ...adicionados.map((c) => ({ ...c, ativo: c.ativo !== false }))];
+      });
+      toast(`${novos.length} cliente(s) lido(s) da planilha (novos foram adicionados). Clique em Salvar.`, 'success');
+    } catch (err) {
+      toast(`Falha ao importar: ${err?.message || err}`, 'error');
+    }
+  };
+
   const salvar = async () => {
     setSaving(true);
     try {
@@ -1204,6 +1233,7 @@ function ClientesPage({ api, toast }) {
           .map((c) => ({
             documento: String(c.documento || '').replace(/\D/g, ''),
             nome: String(c.nome || '').trim(),
+            ativo: c.ativo !== false,
           }))
           .filter((c) => c.documento || c.nome),
       };
@@ -1226,6 +1256,9 @@ function ClientesPage({ api, toast }) {
              String(c.nome || '').toLowerCase().includes(f);
     });
 
+  const totalAtivos = clientes.filter((c) => c.ativo !== false).length;
+  const todosMarcados = clientes.length > 0 && totalAtivos === clientes.length;
+
   return (
     <div className="page-inner">
       <div className="clientes-toolbar">
@@ -1240,6 +1273,9 @@ function ClientesPage({ api, toast }) {
           <button type="button" className="btn-secondary" onClick={carregar} disabled={loading}>
             Recarregar
           </button>
+          <button type="button" className="btn-secondary" onClick={importar}>
+            Importar planilha
+          </button>
           <button type="button" className="btn-secondary" onClick={adicionar}>
             + Adicionar
           </button>
@@ -1249,14 +1285,22 @@ function ClientesPage({ api, toast }) {
         </div>
       </div>
 
-      {pathInfo && (
-        <div className="clientes-path">Origem: {pathInfo}</div>
-      )}
+      <div className="clientes-path">
+        {totalAtivos} de {clientes.length} selecionado(s) para execução
+        {pathInfo ? ` · Origem: ${pathInfo}` : ''}
+      </div>
 
       <div className="clientes-table-wrap">
         <table className="clientes-table">
           <thead>
             <tr>
+              <th style={{ width: '44px', textAlign: 'center' }} title="Marcar/desmarcar todos">
+                <input
+                  type="checkbox"
+                  checked={todosMarcados}
+                  onChange={(e) => marcarTodos(e.target.checked)}
+                />
+              </th>
               <th style={{ width: '40px' }}>#</th>
               <th style={{ width: '180px' }}>CNPJ / CPF</th>
               <th>Nome do Cliente</th>
@@ -1265,19 +1309,27 @@ function ClientesPage({ api, toast }) {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan="4" className="clientes-empty">Carregando...</td></tr>
+              <tr><td colSpan="5" className="clientes-empty">Carregando...</td></tr>
             )}
             {!loading && filtrados.length === 0 && (
               <tr>
-                <td colSpan="4" className="clientes-empty">
+                <td colSpan="5" className="clientes-empty">
                   {clientes.length === 0
-                    ? 'Nenhum cliente cadastrado. Clique em "+ Adicionar".'
+                    ? 'Nenhum cliente cadastrado. Clique em "Importar planilha" ou "+ Adicionar".'
                     : 'Nenhum resultado para o filtro.'}
                 </td>
               </tr>
             )}
             {!loading && filtrados.map((c) => (
-              <tr key={c._idx}>
+              <tr key={c._idx} className={c.ativo === false ? 'cliente-inativo' : ''}>
+                <td style={{ textAlign: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={c.ativo !== false}
+                    onChange={(e) => editar(c._idx, 'ativo', e.target.checked)}
+                    title={c.ativo !== false ? 'Ativo (vai rodar)' : 'Inativo (nao vai rodar)'}
+                  />
+                </td>
                 <td className="clientes-idx">{c._idx + 1}</td>
                 <td>
                   <input

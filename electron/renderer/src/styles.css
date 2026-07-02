@@ -1029,6 +1029,14 @@ input::placeholder {
   font-family: var(--font-mono);
 }
 
+/* Linha de cliente desmarcado (nao vai rodar na execucao) */
+.clientes-table tr.cliente-inativo td {
+  opacity: 0.45;
+}
+.clientes-table tr.cliente-inativo td:first-child {
+  opacity: 1;
+}
+
 .clientes-table-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
