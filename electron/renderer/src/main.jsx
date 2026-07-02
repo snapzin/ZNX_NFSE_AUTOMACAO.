@@ -665,7 +665,7 @@ function Sidebar({ page, setPage, devUnlocked, onLockDev }) {
   );
 }
 
-function parseProgress(logs) {
+function parseProgress(logs, finalizado = false) {
   let total = 0;
   const clients = [];
 
@@ -694,6 +694,13 @@ function parseProgress(logs) {
       continue;
     }
 
+    // Conclusao do download de um cliente (log do adn_client): marca o cliente
+    // corrente como ok assim que ele termina — sem esperar o proximo aparecer.
+    if (/\bADN concluido\b/i.test(msg) && clients.length > 0) {
+      const last = clients[clients.length - 1];
+      if (last.status === 'running') last.status = 'ok';
+    }
+
     if (String(log.level || '').toUpperCase() === 'ERROR' && clients.length > 0) {
       const last = clients[clients.length - 1];
       last.status = 'error';
@@ -701,6 +708,12 @@ function parseProgress(logs) {
       errMsg = errMsg.split('\n')[0].slice(0, 240);
       last.message = errMsg;
     }
+  }
+
+  // Job terminou: o ULTIMO cliente nunca recebe um "[i/N] proximo" que o marque
+  // como ok — sem isto o progresso trava em (N-1)/N e nunca chega a 100%.
+  if (finalizado && clients.length > 0 && clients[clients.length - 1].status === 'running') {
+    clients[clients.length - 1].status = 'ok';
   }
 
   return { total, clients };
@@ -836,7 +849,9 @@ function ExecutarPage({ api, toast, setStatus, onLogsUpdate, onJobStatusUpdate, 
     ? 'Mês anterior'
     : (dataInicio && dataFim ? `${isoToBrShort(dataInicio)} → ${isoToBrShort(dataFim)}` : 'Manual');
 
-  const progress = parseProgress(logs);
+  // `!busy` (e ha logs) = o job terminou -> finaliza o ultimo cliente p/ o
+  // progresso fechar em 100%.
+  const progress = parseProgress(logs, !busy && logs.length > 0);
   const okCount = progress.clients.filter((c) => c.status === 'ok').length;
   const errCount = progress.clients.filter((c) => c.status === 'error').length;
   const runningCount = progress.clients.filter((c) => c.status === 'running').length;
