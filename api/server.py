@@ -642,6 +642,53 @@ def _salvar_clientes_local(clientes: list[dict]) -> dict:
     return {"ok": True, "salvos": len(clientes), "path": str(xlsx_path), "source": "local"}
 
 
+# ── Overlay LOCAL da selecao (ativo/inativo) por CNPJ ────────────────────────
+# O servidor de licencas so guarda documento+nome (descarta 'ativo'). Para a
+# selecao por checkbox funcionar mesmo com armazenamento remoto, guardamos o
+# ativo/inativo num arquivo local por CNPJ e aplicamos ao ler/executar.
+def _overlay_path() -> Path:
+    return _resolver_xlsx_path().with_name("clientes_selecao.json")
+
+
+def _ler_overlay() -> dict:
+    import json
+    p = _overlay_path()
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return {re.sub(r"\D", "", str(k)): bool(v) for k, v in (data or {}).items()}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Falha ao ler selecao de clientes: %s", e)
+        return {}
+
+
+def _salvar_overlay(clientes: list[dict]) -> None:
+    import json
+    sel = {}
+    for c in clientes or []:
+        doc = re.sub(r"\D", "", str(c.get("documento", "")))
+        if doc:
+            sel[doc] = bool(c.get("ativo", True))
+    try:
+        _overlay_path().write_text(json.dumps(sel), encoding="utf-8")
+    except OSError as e:
+        logger.warning("Falha ao salvar selecao de clientes: %s", e)
+
+
+def _aplicar_overlay(clientes: list[dict]) -> list[dict]:
+    """Sobrescreve 'ativo' de cada cliente com a selecao local salva (por CNPJ).
+    Clientes sem entrada no overlay mantem o proprio 'ativo' (default True)."""
+    ov = _ler_overlay()
+    if not ov:
+        return clientes
+    for c in clientes:
+        doc = re.sub(r"\D", "", str(c.get("documento", "")))
+        if doc in ov:
+            c["ativo"] = ov[doc]
+    return clientes
+
+
 def _clientes_remotos_ativos() -> bool:
     value = os.environ.get("NFSE_CLIENTES_REMOTE", "1").strip().lower()
     return value not in {"0", "false", "no", "off"}
@@ -721,11 +768,11 @@ def _clientes_atuais(license_key: str) -> list[dict]:
             data = _clientes_remote_call("get", license_key)
             clientes = _normalizar_clientes(data.get("clientes") or [])
             if clientes:
-                return clientes
+                return _aplicar_overlay(clientes)
         except Exception as remote_err:
             logger.warning("Falha ao obter clientes do servidor p/ execucao: %s", remote_err)
     try:
-        return _ler_clientes_local().get("clientes") or []
+        return _aplicar_overlay(_ler_clientes_local().get("clientes") or [])
     except Exception as local_err:
         logger.warning("Falha ao ler clientes locais p/ execucao: %s", local_err)
         return []
@@ -738,7 +785,7 @@ async def listar_clientes(request: Request):
         if _clientes_remotos_ativos():
             try:
                 data = _clientes_remote_call("get", request.headers.get("x-license-key", ""))
-                clientes = _normalizar_clientes(data.get("clientes") or [])
+                clientes = _aplicar_overlay(_normalizar_clientes(data.get("clientes") or []))
                 if clientes or data.get("updatedAt"):
                     return {
                         "clientes": clientes,
@@ -750,6 +797,7 @@ async def listar_clientes(request: Request):
                     }
 
                 local = _ler_clientes_local()
+                local["clientes"] = _aplicar_overlay(local.get("clientes") or [])
                 if local.get("clientes"):
                     local["location"] = (
                         f"Arquivo local: {local.get('path')} "
@@ -770,6 +818,7 @@ async def listar_clientes(request: Request):
                 logger.warning("Falha ao carregar clientes do servidor: %s", remote_err)
 
         local = _ler_clientes_local()
+        local["clientes"] = _aplicar_overlay(local.get("clientes") or [])
         if not local.get("location"):
             local["location"] = f"Arquivo local: {local.get('path')}"
         return local
@@ -783,6 +832,9 @@ async def salvar_clientes(request: Request, payload: dict):
     """Grava clientes por maquina no servidor; local so se NFSE_CLIENTES_REMOTE=0."""
     try:
         clientes = _normalizar_clientes(payload.get("clientes") or [])
+        # Guarda a selecao (ativo/inativo) localmente — o servidor descarta esse
+        # campo, entao o overlay local e a fonte da verdade da selecao.
+        _salvar_overlay(clientes)
 
         if _clientes_remotos_ativos():
             try:

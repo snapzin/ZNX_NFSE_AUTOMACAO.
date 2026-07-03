@@ -29,7 +29,9 @@ function normalizeClientes(items) {
     if (!item || typeof item !== 'object') continue;
     const documento = String(item.documento || '').replace(/\D/g, '').slice(0, 32);
     const nome = String(item.nome || '').trim().slice(0, 200);
-    if (documento || nome) out.push({ documento, nome });
+    // Preserva 'ativo' (checkbox de quais clientes rodam). Ausente = true.
+    const ativo = item.ativo === undefined ? true : Boolean(item.ativo);
+    if (documento || nome) out.push({ documento, nome, ativo });
     if (out.length >= MAX_CLIENTES) break;
   }
   return out;
