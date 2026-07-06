@@ -246,7 +246,7 @@ class NFSEGuiApp(ctk.CTk):
             text_color=P.text_primary,
         ).pack(anchor="w")
         ctk.CTkLabel(
-            name_box, text=f"v{APP_VER}  ·  CONX Contabilidade",
+            name_box, text=f"v{APP_VER}  ·  ZNX",
             font=ctk.CTkFont(family=FONT, size=10),
             text_color=P.text_secondary,
         ).pack(anchor="w")
@@ -845,7 +845,7 @@ class NFSEGuiApp(ctk.CTk):
             text=(
                 "Automação de download de NFS-e (emitidas + recebidas)\n"
                 "e importação no Domínio Web, empresa por empresa.\n\n"
-                "© CONX Contabilidade"
+                "© ZNX"
             ),
             font=ctk.CTkFont(family=FONT, size=12),
             text_color=P.text_secondary, justify="center",

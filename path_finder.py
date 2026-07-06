@@ -4,7 +4,7 @@ Objetivo: o app deve funcionar em qualquer maquina (instalador), sem depender
 de letra de unidade fixa nem caminho codificado.
 
 - Certificados: ficam no Google Drive ("Meu Drive"/"My Drive") em
-  CONX\\CERTIFICADO DIGITAL CLIENTES. A letra do drive muda por maquina.
+  uma pasta de certificados. A letra do drive muda por maquina.
 - DOMINIO WEB: pasta local no disco do sistema (C:). A pasta "Simples Nacional"
   e criada dentro dela e usada como destino (PASTA_SAIDA).
 
@@ -18,9 +18,9 @@ import os
 import string
 from pathlib import Path
 
-# Nomes-alvo (constantes do cliente CONX / Google Drive)
+# Nomes-alvo para descoberta de pastas no Google Drive
 GOOGLE_DRIVE_NAMES = ("Meu Drive", "My Drive")
-CERT_PARENT_HINT = "CONX"
+CERT_PARENT_HINT = "NFSE"
 CERT_FOLDER_NAME = "CERTIFICADO DIGITAL CLIENTES"
 DOMINIO_WEB_NAME = "DOMINIO WEB"
 SIMPLES_NACIONAL_NAME = "Simples Nacional"

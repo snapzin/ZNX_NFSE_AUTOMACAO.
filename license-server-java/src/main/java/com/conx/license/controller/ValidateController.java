@@ -1,7 +1,7 @@
-package com.conx.license.controller;
+package com.nfse.license.controller;
 
-import com.conx.license.model.LicenseRecord;
-import com.conx.license.repository.LicenseRepository;
+import com.nfse.license.model.LicenseRecord;
+import com.nfse.license.repository.LicenseRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @CrossOrigin(origins = "*")
 public class ValidateController {
 
-    private static final String CONTACT = "conxcontabil@gmail.com";
+    private static final String CONTACT = "suporte@nfse.local";
     private static final int MAX_REQ = 30;
     private static final long WINDOW_MS = 60_000;
 

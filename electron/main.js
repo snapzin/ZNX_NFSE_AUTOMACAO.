@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { createLicenseClient, getLicenseSettings } = require('./license-client');
 
-// Auto-update via GitHub Releases (repo publico snapzin/CONX_NFSE_AUTOMA-O).
+// Auto-update via GitHub Releases (repo público do projeto).
 // Só roda no app empacotado; em dev é ignorado.
 let autoUpdater = null;
 try { ({ autoUpdater } = require('electron-updater')); } catch (_) {}

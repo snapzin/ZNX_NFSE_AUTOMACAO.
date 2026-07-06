@@ -443,7 +443,7 @@ function OnboardingWizard({ api, suggestions, onComplete }) {
         {step === 0 && (
           <>
             <div className="onboarding-icon">
-              <img src="./conx-logo.png" alt="CONX" style={{ width: 120 }} />
+              <img src="./logo.png" alt="Logo" style={{ width: 120 }} />
             </div>
             <h2 className="onboarding-title">Bem-vindo ao NFSe Automação</h2>
             <p className="onboarding-desc">
@@ -583,7 +583,7 @@ function ActivationModal({ api, onSuccess, onCancel, toast }) {
       <form className="modal-box" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <div className="modal-icon"><Icon.Lock /></div>
         <h3>Ativar licença</h3>
-        <p>Insira a chave de ativação fornecida pela CONX Contabilidade.</p>
+        <p>Insira a chave de ativação fornecida pela ZNX.</p>
         <input
           ref={inputRef}
           type="text"
@@ -602,7 +602,7 @@ function ActivationModal({ api, onSuccess, onCancel, toast }) {
           </button>
         </div>
         <p style={{ marginTop: 16, fontSize: 11, color: 'var(--text-2)' }}>
-          Para adquirir uma licença: conxcontabil@gmail.com
+          Para adquirir uma licença: zayonantunes@gmail.com
         </p>
       </form>
     </div>
@@ -631,7 +631,7 @@ function Sidebar({ page, setPage, devUnlocked, onLockDev }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <img src="./conx-logo.png" alt="CONX" className="logo-img" />
+        <img src="./logo.png" alt="Logo" className="logo-img" />
       </div>
       <nav className="sidebar-nav">
         {navItems.map((item) => {

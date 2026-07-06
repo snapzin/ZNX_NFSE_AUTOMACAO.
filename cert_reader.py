@@ -255,7 +255,7 @@ if __name__ == "__main__":
     pasta = (
         sys.argv[1]
         if len(sys.argv) > 1
-        else r"G:\Meu Drive\CONX\CERTIFICADO DIGITAL CLIENTES"
+        else r"G:\Meu Drive\CERTIFICADO DIGITAL CLIENTES"
     )
     certs = listar_certificados(pasta)
 

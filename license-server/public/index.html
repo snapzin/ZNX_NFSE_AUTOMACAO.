@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="robots" content="noindex, nofollow" />
-<title>ZNX • Licenças NFSe</title>
+<title>Licenças NFSe</title>
 <style>
   :root { --bg:#0b0b0c; --card:#161618; --line:#2a2a2e; --txt:#f2f2f3; --txt2:#9a9aa2;
           --ok:#34c759; --warn:#ffcc00; --err:#ff453a; --accent:#34c759; }
@@ -115,9 +115,9 @@
 
 <form id="login" class="card login-card" onsubmit="entrar(); return false;">
   <div class="login-head">
-    <div class="login-mark">CX</div>
-    <h1 class="login-title">Painel de Licencas</h1>
-    <p class="login-subtitle">Acesso administrativo CONX para gerenciar chaves, maquinas e usuarios.</p>
+    <div class="login-mark">ZX</div>
+    <h1 class="login-title">Painel de Licenças</h1>
+    <p class="login-subtitle">Acesso administrativo da ZNX para gerenciar chaves, máquinas e usuários.</p>
   </div>
   <div class="login-body">
   <div class="login-fields">
@@ -138,7 +138,7 @@
 
 <div id="app" class="hidden">
   <header>
-    <strong>ZNX</strong> <span class="muted">Licenças NFSe</span>
+    <strong>ZNX</strong> <span class="muted">Licenças</span>
     <span class="sp"></span>
     <span id="stat" class="muted"></span>
     <button onclick="carregar(); carregarUsuarios();">Atualizar</button>
@@ -189,9 +189,9 @@
 
 <script>
 const API = '/api/admin';
-localStorage.removeItem('conx_admin_token');
-let ADMIN_USER = sessionStorage.getItem('conx_admin_user') || '';
-let ADMIN_PASS = sessionStorage.getItem('conx_admin_pass') || '';
+localStorage.removeItem('nfse_admin_token');
+let ADMIN_USER = sessionStorage.getItem('nfse_admin_user') || '';
+let ADMIN_PASS = sessionStorage.getItem('nfse_admin_pass') || '';
 let DATA = [];
 
 function toast(msg) { const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2600); }
@@ -216,8 +216,8 @@ async function entrar() {
   ADMIN_USER = document.getElementById('user').value.trim();
   ADMIN_PASS = document.getElementById('pass').value;
   try { await api('list');
-    sessionStorage.setItem('conx_admin_user', ADMIN_USER);
-    sessionStorage.setItem('conx_admin_pass', ADMIN_PASS);
+    sessionStorage.setItem('nfse_admin_user', ADMIN_USER);
+    sessionStorage.setItem('nfse_admin_pass', ADMIN_PASS);
     document.getElementById('login').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     carregar();
@@ -225,10 +225,10 @@ async function entrar() {
   } catch(e) { document.getElementById('loginErr').textContent = '❌ ' + e.message; }
 }
 function sair(reload=true) {
-  sessionStorage.removeItem('conx_admin_user');
-  sessionStorage.removeItem('conx_admin_pass');
-  sessionStorage.removeItem('conx_admin_token');
-  localStorage.removeItem('conx_admin_token');
+  sessionStorage.removeItem('nfse_admin_user');
+  sessionStorage.removeItem('nfse_admin_pass');
+  sessionStorage.removeItem('nfse_admin_token');
+  localStorage.removeItem('nfse_admin_token');
   if (reload) location.reload();
 }
 

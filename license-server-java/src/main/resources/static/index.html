@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="robots" content="noindex, nofollow" />
-<title>CONX · Licenças NFSe</title>
+<title>Licenças NFSe</title>
 <style>
   :root {
     --bg:       #080808;
@@ -427,7 +427,7 @@
 <!-- Login -->
 <div id="login">
   <div class="login-box">
-    <div class="login-logo">CONX Contabilidade</div>
+    <div class="login-logo">ZNX</div>
     <h2>Painel de Licenças</h2>
     <p>Informe suas credenciais de administrador.</p>
     <div class="fld" style="margin-bottom:10px">
@@ -448,10 +448,10 @@
   <header>
     <div class="header-brand">
       <div class="header-brand-dot"></div>
-      CONX
+      ZNX
     </div>
     <span class="header-sep">·</span>
-    <span class="muted" style="font-size:12px">Licenças NFSe</span>
+    <span class="muted" style="font-size:12px">Licenças</span>
     <span class="sp"></span>
     <span id="stat"></span>
     <button class="btn-ghost" onclick="carregar()">Atualizar</button>
@@ -521,7 +521,7 @@
 
 <script>
 const API = '/api/admin';
-let AUTH = localStorage.getItem('conx_admin_auth') || '';
+let AUTH = localStorage.getItem('nfse_admin_auth') || '';
 let DATA = [];
 
 function toast(msg) {
@@ -564,7 +564,7 @@ async function entrar() {
   setLoading(btn, true, 'Entrando...');
   try {
     await api('list');
-    localStorage.setItem('conx_admin_auth', AUTH);
+    localStorage.setItem('nfse_admin_auth', AUTH);
     document.getElementById('login').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     carregar();
@@ -575,7 +575,7 @@ async function entrar() {
   }
 }
 
-function sair() { AUTH = ''; localStorage.removeItem('conx_admin_auth'); location.reload(); }
+function sair() { AUTH = ''; localStorage.removeItem('nfse_admin_auth'); location.reload(); }
 
 async function carregar() {
   const btn = document.querySelector('header .btn-ghost');

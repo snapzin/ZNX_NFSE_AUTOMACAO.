@@ -14,7 +14,7 @@ class PageSobre {
             Automatiza o download de NFSe para múltiplos clientes<br>
             via Playwright local, sem dependência de API externa.
           </p>
-          <p class="copyright">(c) CONX Contabilidade</p>
+          <p class="copyright">(c) ZNX</p>
 
           <div class="about-info">
             <div class="info-row">

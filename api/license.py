@@ -2,7 +2,7 @@
 api/license.py — Validação de licença.
 
 Dois tipos de chave:
-  - Mestra (CONX): validada localmente por hash apenas com NFSE_ALLOW_MASTER_LICENSE=1.
+  - Mestra: validada localmente por hash apenas com NFSE_ALLOW_MASTER_LICENSE=1.
   - Cliente: validada contra o servidor Vercel a cada execução.
 """
 
@@ -125,7 +125,7 @@ def validate_key(key: str) -> tuple[bool, str]:
     normalized = key.upper().replace("-", "").strip()
 
     if _is_master_key(normalized) and _master_key_enabled():
-        return True, "Licença CONX ativa."
+        return True, "Licença ativa."
     if _is_master_key(normalized):
         return False, "Chave mestra local desativada nesta instalacao. Use uma licenca do servidor."
 
