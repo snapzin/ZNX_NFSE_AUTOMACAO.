@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Assinar — TáBatido</title>
+<style>
+  :root { --bg:#0b0b0c; --card:#161618; --line:#2a2a2e; --txt:#f2f2f3; --txt2:#9a9aa2; --accent:#34c759; --err:#ff453a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:520px; margin:48px auto; padding:0 16px; }
+  h1 { font-size:22px; margin:0 0 6px; }
+  p.sub { color:var(--txt2); margin:0 0 24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:24px; }
+  .fld { display:flex; flex-direction:column; gap:6px; margin-bottom:16px; }
+  .fld label { font-size:12px; color:var(--txt2); }
+  input, select { background:#0f0f11; border:1px solid var(--line); color:var(--txt);
+                  border-radius:8px; padding:10px 12px; font-size:14px; width:100%; }
+  .planos { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; }
+  .plano { border:1px solid var(--line); border-radius:10px; padding:12px; cursor:pointer; }
+  .plano.sel { border-color:var(--accent); background:rgba(52,199,89,.08); }
+  .plano b { display:block; }
+  .plano span { color:var(--txt2); font-size:12px; }
+  button { width:100%; cursor:pointer; border:none; background:var(--accent); color:#04140a;
+           border-radius:10px; padding:12px 14px; font-size:14px; font-weight:700; }
+  button:disabled { opacity:.6; cursor:default; }
+  #msg { margin-top:14px; font-size:13px; }
+  #msg.err { color:var(--err); }
+  #msg.ok { color:var(--accent); }
+  a.pay-link { display:block; text-align:center; margin-top:14px; color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>TáBatido</h1>
+  <p class="sub">Assine e receba sua chave de licença assim que o pagamento for confirmado.</p>
+  <form id="form" class="card" onsubmit="enviar(event)">
+    <div class="fld"><label>Nome do escritório</label><input id="clientName" required /></div>
+    <div class="fld"><label>CNPJ (ou CPF)</label><input id="cnpj" required inputmode="numeric" /></div>
+    <div class="fld"><label>E-mail</label><input id="email" type="email" required /></div>
+    <div class="fld"><label>Telefone (opcional)</label><input id="phone" inputmode="numeric" /></div>
+
+    <div class="planos">
+      <div class="plano sel" data-plano="basico" onclick="selecionarPlano(this)">
+        <b>Básico — R$ 149,90/mês</b><span>1 máquina</span>
+      </div>
+      <div class="plano" data-plano="pro" onclick="selecionarPlano(this)">
+        <b>Pro — R$ 249,90/mês</b><span>até 3 máquinas</span>
+      </div>
+    </div>
+
+    <p class="sub" style="margin:-6px 0 14px; font-size:12px;">Pagamento via PIX (outras formas em breve).</p>
+    <button id="btn" type="submit">Assinar agora</button>
+    <div id="msg"></div>
+  </form>
+</div>
+<script>
+let PLANO = 'basico';
+function selecionarPlano(el) {
+  document.querySelectorAll('.plano').forEach((p) => p.classList.remove('sel'));
+  el.classList.add('sel');
+  PLANO = el.dataset.plano;
+}
+
+// Pre-seleciona o plano vindo da landing page (ex.: /assinar.html?plano=pro)
+(function preSelecionarPlanoDaUrl() {
+  const alvo = new URLSearchParams(location.search).get('plano');
+  const el = alvo && document.querySelector(`.plano[data-plano="${alvo}"]`);
+  if (el) selecionarPlano(el);
+})();
+
+async function enviar(ev) {
+  ev.preventDefault();
+  const btn = document.getElementById('btn');
+  const msg = document.getElementById('msg');
+  msg.className = ''; msg.textContent = '';
+  btn.disabled = true; btn.textContent = 'Enviando...';
+
+  const payload = {
+    clientName: document.getElementById('clientName').value.trim(),
+    cnpj: document.getElementById('cnpj').value.trim(),
+    email: document.getElementById('email').value.trim(),
+    phone: document.getElementById('phone').value.trim(),
+    plano: PLANO,
+  };
+
+  try {
+    const r = await fetch('/api/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) throw new Error(d.message || 'Falha ao criar assinatura.');
+
+    msg.className = 'ok';
+    msg.innerHTML = 'Cadastro criado! Conclua o pagamento para ativar sua licença — '
+      + 'a chave será enviada por e-mail assim que o pagamento for confirmado.';
+    if (d.invoiceUrl) {
+      const a = document.createElement('a');
+      a.href = d.invoiceUrl; a.target = '_blank'; a.rel = 'noopener';
+      a.className = 'pay-link'; a.textContent = 'Ir para o pagamento →';
+      msg.after(a);
+    }
+    btn.textContent = 'Cadastro enviado';
+  } catch (e) {
+    msg.className = 'err';
+    msg.textContent = 'Erro: ' + e.message;
+    btn.disabled = false; btn.textContent = 'Assinar agora';
+  }
+}
+</script>
+</body>
+</html>

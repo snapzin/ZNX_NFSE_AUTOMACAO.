@@ -86,7 +86,10 @@ export function genKey() {
 // Formato do registro (JSON em lic:<KEY>):
 // { clientName, status: "active"|"blocked", maxMachines,
 //   machines: {<id>:{firstSeen,lastSeen,status:"active"|"blocked",blockedAt?}},
-//   expiresAt: ISO|null, createdAt: ISO, notes }
+//   expiresAt: ISO|null, createdAt: ISO, notes,
+//   // Cobranca (Asaas) — presentes so em licencas criadas via signup/webhook:
+//   asaasCustomerId?, asaasSubscriptionId?, plano?,
+//   billingStatus?: "manual"|"em_dia"|"atrasado"|"cancelado" }
 export async function getRecord(k) {
   const r = redis();
   if (!r) return null;
@@ -177,6 +180,48 @@ export async function listAdminUsers() {
   }
   out.sort((a, b) => a.username.localeCompare(b.username));
   return out;
+}
+
+// ── Indice assinatura Asaas -> chave de licenca ──────────────────────────────
+// Permite ao webhook achar a licenca certa a partir do subscription id, sem
+// varrer todas as licencas.
+const asaasSubPath = (subId) => `asaas:sub:${subId}`;
+
+export async function getLicenseKeyBySubscription(subId) {
+  const r = redis();
+  if (!r || !subId) return null;
+  return (await r.get(asaasSubPath(subId))) || null;
+}
+
+export async function linkSubscriptionToKey(subId, key) {
+  const r = redis();
+  if (!r) throw new Error('Banco (Upstash Redis) nao configurado.');
+  await r.set(asaasSubPath(subId), key);
+}
+
+// Dados do signup (clientName, maxMachines, plano, email) guardados entre a
+// criacao da subscription na Asaas e a confirmacao do 1o pagamento (webhook).
+// So depois do pagamento confirmado a licenca de fato nasce.
+const asaasPendingPath = (subId) => `asaas:pending:${subId}`;
+
+export async function savePendingSignup(subId, data) {
+  const r = redis();
+  if (!r) throw new Error('Banco (Upstash Redis) nao configurado.');
+  await r.set(asaasPendingPath(subId), JSON.stringify(data));
+}
+
+export async function getPendingSignup(subId) {
+  const r = redis();
+  if (!r || !subId) return null;
+  const rec = await r.get(asaasPendingPath(subId));
+  if (!rec) return null;
+  return typeof rec === 'string' ? JSON.parse(rec) : rec;
+}
+
+export async function deletePendingSignup(subId) {
+  const r = redis();
+  if (!r) return;
+  await r.del(asaasPendingPath(subId));
 }
 
 // Chaves legadas em VALID_KEYS (compatibilidade com a versao antiga).

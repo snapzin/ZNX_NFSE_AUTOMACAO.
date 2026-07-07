@@ -1,12 +1,55 @@
-# Servidor de Licenças NFSe Automação (Vercel + Upstash Redis)
+# Servidor de Licenças — TáBatido (Vercel + Upstash Redis)
 
-Valida as licenças do app e oferece um **painel admin** para gerenciar clientes:
-criar/revogar chaves, limite de máquinas, validade, ver quem está ativo.
+Produto ZNX. Valida as licenças do app, oferece um **painel admin** para
+gerenciar clientes (criar/revogar chaves, limite de máquinas, validade, ver
+quem está ativo) e uma camada de **cobrança recorrente via Asaas** com dois
+caminhos de entrada de cliente: venda manual (você cria a licença no painel)
+e autoatendimento (escritório se cadastra e paga sozinho em `/assinar.html`).
 
-- `GET /` → painel admin (protegido por usuario/senha)
+- `GET /` → site de vendas (landing page pública, preços, CTA)
+- `GET /admin.html` → painel admin (protegido por usuario/senha)
+- `GET /assinar.html` → página pública de autoatendimento (signup + checkout Asaas); aceita `?plano=basico|pro` pra vir pré-selecionado a partir da landing page
 - `POST /api/validate` → usado pelo app (`{key, machine_id}` → `{valid, message}`)
 - `POST /api/clientes` → clientes salvos por licenca + maquina (`op: "get"|"save"`)
 - `POST /api/admin` → API de gerenciamento (headers `x-admin-user` e `x-admin-pass`)
+- `POST /api/signup` → autoatendimento: cria customer+subscription na Asaas e
+  devolve o link de pagamento (chamado pela página `/assinar.html`)
+- `POST /api/asaas-webhook` → recebido da Asaas quando um pagamento muda de
+  status; cria/renova/bloqueia a licença automaticamente (ver seção abaixo)
+
+## Cobrança recorrente (Asaas)
+
+1. Crie uma conta na Asaas (sandbox para testar: https://sandbox.asaas.com) e
+   gere uma API Key em Configurações → Integrações.
+2. Configure as variáveis de ambiente na Vercel:
+
+   | Variável | Valor |
+   |---|---|
+   | `ASAAS_API_KEY` | API key da Asaas (sandbox ou produção) |
+   | `ASAAS_ENV` | `sandbox` ou `production` |
+   | `ASAAS_WEBHOOK_TOKEN` | token que você define; deve ser o mesmo cadastrado no webhook da Asaas |
+   | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `MAIL_FROM` | (opcional) para enviar a chave por e-mail quando a licença é criada |
+   | `INSTALLER_URL` | (opcional) link do instalador, incluído no e-mail |
+   | `ASAAS_BILLING_TYPE` | (opcional) forma de cobrança do checkout. Padrão `PIX` — a conta Asaas normalmente libera cartão só depois da verificação de documentos; quando isso acontecer, mude para `UNDEFINED` (deixa o cliente escolher PIX/boleto/cartão na fatura) sem precisar mexer em código |
+
+3. No painel da Asaas: Integrações → Webhooks → nova URL apontando para
+   `https://SEU-PROJETO.vercel.app/api/asaas-webhook`, com o **Token de
+   autenticação** igual a `ASAAS_WEBHOOK_TOKEN`. Marque pelo menos os eventos
+   `PAYMENT_CONFIRMED`, `PAYMENT_RECEIVED`, `PAYMENT_OVERDUE`,
+   `SUBSCRIPTION_DELETED`, `PAYMENT_DELETED`, `PAYMENT_REFUNDED`.
+4. Os planos (nome, preço, limite de máquinas) ficam definidos em
+   `api/signup.js` (`PLANOS`) — o valor cobrado nunca vem do formulário do
+   cliente, sempre do servidor.
+5. Fluxo: `assinar.html` → `POST /api/signup` (cria customer+subscription na
+   Asaas, guarda um registro "pending" ligado ao `subscriptionId`) → cliente
+   paga no link da Asaas → Asaas chama `POST /api/asaas-webhook` →
+   `PAYMENT_CONFIRMED`/`PAYMENT_RECEIVED` gera a licença de verdade (ou renova
+   uma existente), `PAYMENT_OVERDUE` marca `billingStatus: "atrasado"` (sem
+   bloquear — é uma folga), `SUBSCRIPTION_DELETED`/`PAYMENT_DELETED`/
+   `PAYMENT_REFUNDED` bloqueia a licença.
+6. Venda manual (fora do autoatendimento): continue usando `op: "create"` no
+   painel admin normalmente — essas licenças ficam com `billingStatus:
+   "manual"` e nunca são tocadas pelo webhook.
 
 ---
 

@@ -130,6 +130,9 @@ export default async function handler(req, res) {
         createdAt: r.createdAt || null,
         lastSeen: r.lastSeen || null,
         notes: r.notes || '',
+        billingStatus: r.billingStatus || 'manual',
+        plano: r.plano || '',
+        asaasCustomerId: r.asaasCustomerId || '',
       }));
       items.sort((a, b) => (a.clientName || '').localeCompare(b.clientName || ''));
       return res.status(200).json({ ok: true, total: items.length, items });
@@ -193,6 +196,9 @@ export default async function handler(req, res) {
         createdAt: new Date().toISOString(),
         lastSeen: null,
         notes: String(body.notes || ''),
+        // Licenca criada manualmente no painel: sem cobranca automatica vinculada.
+        billingStatus: 'manual',
+        plano: String(body.plano || ''),
       };
       await saveRecord(k, rec);
       return res.status(200).json({ ok: true, key: k, keyFmt: formatKey(k), record: rec });
@@ -206,6 +212,8 @@ export default async function handler(req, res) {
       if (body.status !== undefined) rec.status = body.status === 'blocked' ? 'blocked' : 'active';
       if (body.maxMachines !== undefined) rec.maxMachines = Math.max(1, Number(body.maxMachines));
       if (body.notes !== undefined) rec.notes = String(body.notes);
+      if (body.plano !== undefined) rec.plano = String(body.plano);
+      if (body.billingStatus !== undefined) rec.billingStatus = String(body.billingStatus);
       if (body.expiresAt !== undefined) rec.expiresAt = body.expiresAt || null;
       else {
         const e = daysToExpiry(body.days);
