@@ -1,7 +1,7 @@
-package com.nfse.license.controller;
+package com.conx.license.controller;
 
-import com.nfse.license.model.LicenseRecord;
-import com.nfse.license.repository.LicenseRepository;
+import com.conx.license.model.LicenseRecord;
+import com.conx.license.repository.LicenseRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,7 +48,8 @@ public class ValidateController {
         if (isRateLimited(ip))
             return ResponseEntity.status(429).body(invalid("Muitas requisições. Tente novamente."));
 
-        if (body == null) body = new HashMap<>();
+        if (body == null)
+            body = new HashMap<>();
         Object rawKey = body.get("key");
         if (rawKey == null || rawKey.toString().isBlank())
             return ResponseEntity.badRequest().body(invalid("Chave não informada"));
@@ -73,9 +74,10 @@ public class ValidateController {
             if (rec.getExpiresAt() != null && Instant.now().isAfter(Instant.parse(rec.getExpiresAt())))
                 return ResponseEntity.ok(invalid("Licença expirada. Contato: " + CONTACT));
 
-            TypeReference<Map<String, Object>> tr = new TypeReference<>() {};
+            TypeReference<Map<String, Object>> tr = new TypeReference<>() {
+            };
             Map<String, Object> machines = mapper.readValue(
-                rec.getMachinesJson() == null ? "{}" : rec.getMachinesJson(), tr);
+                    rec.getMachinesJson() == null ? "{}" : rec.getMachinesJson(), tr);
 
             String now = Instant.now().toString();
 
@@ -90,7 +92,7 @@ public class ValidateController {
                 machines.put(mid, mInfo);
             } else {
                 return ResponseEntity.ok(invalid(
-                    "Limite de " + rec.getMaxMachines() + " máquina(s) atingido. Contato: " + CONTACT));
+                        "Limite de " + rec.getMaxMachines() + " máquina(s) atingido. Contato: " + CONTACT));
             }
 
             rec.setMachinesJson(mapper.writeValueAsString(machines));
@@ -100,15 +102,19 @@ public class ValidateController {
             return ResponseEntity.ok(valid());
 
         } catch (Exception e) {
-            if (legacyKeys().contains(key)) return ResponseEntity.ok(valid());
+            if (legacyKeys().contains(key))
+                return ResponseEntity.ok(valid());
             return ResponseEntity.ok(invalid("Servidor indisponível. Tente novamente."));
         }
     }
 
     private boolean isRateLimited(String ip) {
         long now = System.currentTimeMillis();
-        long[] e = hits.getOrDefault(ip, new long[]{0, now});
-        if (now - e[1] > WINDOW_MS) { hits.put(ip, new long[]{1, now}); return false; }
+        long[] e = hits.getOrDefault(ip, new long[] { 0, now });
+        if (now - e[1] > WINDOW_MS) {
+            hits.put(ip, new long[] { 1, now });
+            return false;
+        }
         e[0]++;
         hits.put(ip, e);
         return e[0] > MAX_REQ;
@@ -118,7 +124,8 @@ public class ValidateController {
         Set<String> s = new HashSet<>();
         if (validKeysEnv != null) {
             for (String k : validKeysEnv.split(","))
-                if (!k.isBlank()) s.add(AdminController.normalizeKey(k.trim()));
+                if (!k.isBlank())
+                    s.add(AdminController.normalizeKey(k.trim()));
         }
         return s;
     }
