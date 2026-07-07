@@ -95,9 +95,9 @@ echo "[OK] Playwright pronto"
 # ── 5. config.py (usa config_mac.py se config.py nao existir) ─────────────────
 if [ ! -f "config.py" ]; then
     echo ""
-    echo "[...] config.py nao encontrado — copiando config_mac.py -> config.py"
-    cp config_mac.py config.py
-    echo "[OK] config.py criado a partir de config_mac.py"
+    echo "[...] config.py nao encontrado — copiando app/config/config_mac.py -> config.py"
+    cp app/config/config_mac.py config.py
+    echo "[OK] config.py criado a partir de app/config/config_mac.py"
     echo "     EDITE config.py para apontar para suas pastas de certificados."
 else
     echo "[OK] config.py ja existe (nao foi sobrescrito)"
@@ -106,7 +106,7 @@ fi
 # ── 6. Build PyInstaller ──────────────────────────────────────────────────────
 echo ""
 echo "[...] Gerando NFSe_Automacao.app com PyInstaller..."
-pyinstaller --noconfirm NFSE_Automacao_mac.spec
+pyinstaller --noconfirm app/gui/NFSE_Automacao_mac.spec
 
 # ── 7. Copia config.py para dentro do bundle ─────────────────────────────────
 if [ -d "dist/NFSe_Automacao.app" ]; then

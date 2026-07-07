@@ -26,7 +26,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Optional
 
-from config_defaults import apply_defaults, ensure_config_file
+from app.config.config_defaults import apply_defaults, ensure_config_file
 
 try:
     ensure_config_file()
@@ -35,7 +35,7 @@ except ImportError:
     ensure_config_file()
     import config
 apply_defaults(config)
-from cert_reader import CertificadoInfo, indexar_certificados_por_cnpj, listar_certificados
+from app.automation.cert_reader import CertificadoInfo, indexar_certificados_por_cnpj, listar_certificados
 
 
 logging.basicConfig(
@@ -194,7 +194,7 @@ def _baixar_cliente_adn(
     """Baixa os DF-e do cliente direto da API ADN (mTLS) e salva em
     output_dir/<Tipo>/. Retorna (n_emitidas, arq_emitidas, n_recebidas,
     arq_recebidas, conferencia)."""
-    import adn_client
+    from app.automation import adn_client
 
     competencias = _competencias_no_periodo(params.data_inicio, params.data_fim) or None
     tipos = _tipos_para_adn(getattr(params, "tipos", "ambas"))
@@ -559,7 +559,7 @@ def _gerar_relatorios(resultados: list[ResultadoCNPJ]) -> None:
     """Gera o Excel de conferencia de cada cliente (com notas) e o consolidado,
     a partir dos XMLs ja salvos em PASTA_SAIDA/<Cliente>/."""
     try:
-        import relatorio
+        from app.reports import relatorio
     except ImportError:
         log.warning("Modulo de relatorio nao encontrado — relatorio ignorado.")
         return
@@ -592,7 +592,7 @@ def _importar_dominio_web(
 ) -> None:
     """Itera pelos resultados com notas baixadas e importa no Domínio Web."""
     try:
-        from dominio_importer import DominioImporter
+        from app.automation.dominio_importer import DominioImporter
     except ImportError:
         log.warning("dominio_importer nao encontrado — importacao no Dominio Web ignorada.")
         return

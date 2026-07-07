@@ -1,4 +1,4 @@
-package com.conx.license;
+package com.nfse.license;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

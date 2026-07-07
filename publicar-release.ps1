@@ -5,7 +5,7 @@
 # Uso:  pwsh -File publicar-release.ps1   (ou clicar com botao direito > Executar)
 # Pre-requisito: ter rodado o build (CONSTRUIR_INSTALADOR.bat) gerando electron\dist.
 $ErrorActionPreference = 'Stop'
-$repo = "snapzin/CONX_NFSE_AUTOMA-O"
+$repo = "snapzin/ZNX_NFSE_AUTOMACAO"
 
 # --- versao ---
 $pkg = Get-Content (Join-Path $PSScriptRoot "electron\package.json") -Raw | ConvertFrom-Json
@@ -25,10 +25,10 @@ Add-Type -TypeDefinition $sig
 $bytes = [Convert]::FromBase64String([Cred]::ReadB64("git:https://github.com"))
 $tok = $null
 foreach ($c in @([Text.Encoding]::Unicode.GetString($bytes), [Text.Encoding]::UTF8.GetString($bytes)) | ForEach-Object { ($_ -replace "`0","").Trim() } | Select-Object -Unique) {
-  try { Invoke-RestMethod "https://api.github.com/user" -Headers @{Authorization="token $c";"User-Agent"="conx";"Accept"="application/vnd.github+json"} -TimeoutSec 20 | Out-Null; $tok = $c; break } catch {}
+  try { Invoke-RestMethod "https://api.github.com/user" -Headers @{Authorization="token $c";"User-Agent"="znx-nfse-automacao";"Accept"="application/vnd.github+json"} -TimeoutSec 20 | Out-Null; $tok = $c; break } catch {}
 }
 if (-not $tok) { "ERRO: nao consegui o token do GitHub (rode 'git push' uma vez para salvar a credencial)."; exit 1 }
-$h = @{ Authorization = "token $tok"; "User-Agent" = "conx"; "Accept" = "application/vnd.github+json" }
+$h = @{ Authorization = "token $tok"; "User-Agent" = "znx-nfse-automacao"; "Accept" = "application/vnd.github+json" }
 
 # --- cria (ou reutiliza) a release ---
 try {

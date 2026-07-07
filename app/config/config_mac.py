@@ -1,8 +1,6 @@
-# =============================================================================
 # config_mac.py - Configuracoes para TESTE no macOS
-# Para usar: copie este arquivo para config.py antes de rodar
+# Para usar: copie este arquivo para config.py na raiz do projeto antes de rodar
 # (Os usuarios finais usam Windows — este arquivo eh so para testes locais)
-# =============================================================================
 
 from pathlib import Path
 
@@ -53,11 +51,11 @@ DOMINIO_WEB_MODULO    = "Escrita Fiscal"
 DOMINIO_WEB_IMPORTAR  = False
 DOMINIO_WEB_CREDENCIAIS: dict = {}
 
-# ZOHO MAIL
-ZOHO_SMTP_HOST      = "smtppro.zoho.com"
+# ZOHO MAIL (nao utilizado neste ambiente de teste — deixe vazio para desabilitar)
+ZOHO_SMTP_HOST      = ""
 ZOHO_SMTP_PORT      = 587
 ZOHO_SMTP_USE_TLS   = True
-ZOHO_SMTP_USER      = "contabil@conxcontabilidade.com.br"
-ZOHO_SMTP_PASSWORD  = "AgX55wEUs2jY"
-ZOHO_EMAIL_FROM     = "contabil@conxcontabilidade.com.br"
-ZOHO_EMAIL_TO       = "contabil@conxcontabilidade.com.br"
+ZOHO_SMTP_USER      = ""
+ZOHO_SMTP_PASSWORD  = ""
+ZOHO_EMAIL_FROM     = ""
+ZOHO_EMAIL_TO       = ""

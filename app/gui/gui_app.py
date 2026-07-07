@@ -11,11 +11,17 @@ import sys
 from pathlib import Path as _Path
 
 # Quando empacotado pelo PyInstaller, garante que config.py
-# seja lido da pasta do exe (não do bundle interno).
+# seja lido da pasta do exe (não do bundle interno). Em dev, garante que a
+# raiz do projeto (2 niveis acima: app/gui -> app -> raiz) esteja no path
+# para resolver "import config" e os imports do pacote "app".
 if getattr(sys, "frozen", False):
     _app_dir = str(_Path(sys.executable).parent)
     if _app_dir not in sys.path:
         sys.path.insert(0, _app_dir)
+else:
+    _project_root = str(_Path(__file__).resolve().parents[2])
+    if _project_root not in sys.path:
+        sys.path.insert(0, _project_root)
 
 import json
 import logging
@@ -34,8 +40,8 @@ import tkinter as tk
 import customtkinter as ctk
 from tkcalendar import DateEntry
 
-from nfse_automacao import ExecucaoCancelada, executar
-from ui_widgets import (
+from app.automation.nfse_automacao import ExecucaoCancelada, executar
+from app.gui.ui_widgets import (
     AnimatedSidebarButton,
     AnimatedStatCard,
     GlowButton,
@@ -49,8 +55,9 @@ import config
 
 APP_TITLE  = "NFSe Automação"
 APP_VER    = "2.4"
-CONFIG_PATH = Path(__file__).resolve().with_name("config.py")
-STATS_PATH  = Path(__file__).resolve().with_name("runtime_settings.json")
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CONFIG_PATH = _PROJECT_ROOT / "config.py"
+STATS_PATH  = _PROJECT_ROOT / "runtime_settings.json"
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
@@ -64,7 +71,7 @@ else:
     FONT_BOLD = "Bahnschrift SemiBold"
     FONT_MONO = "Consolas"
 
-# ── Paleta preto / branco / azul escuro ──────────────────────────────────────
+# Paleta preto / branco / azul escuro
 @dataclass(frozen=True)
 class Palette:
     header:        str = "#000000"
@@ -103,7 +110,7 @@ TIPS = [
     "O atalho da extensão padrão é Ctrl+Shift+Y — verifique em chrome://extensions/shortcuts.",
 ]
 
-# ── Handler de logs ──────────────────────────────────────────────────────────
+# Handler de logs
 class QueueLogHandler(logging.Handler):
     def __init__(self, q: "queue.Queue[logging.LogRecord]") -> None:
         super().__init__()
@@ -113,7 +120,7 @@ class QueueLogHandler(logging.Handler):
         self.q.put(record)
 
 
-# ── Helpers de stats persistidas ─────────────────────────────────────────────
+# Helpers de stats persistidas
 def _load_stats() -> dict:
     try:
         if STATS_PATH.exists():
@@ -133,9 +140,7 @@ def _save_stats(patch: dict) -> None:
         pass
 
 
-# ═════════════════════════════════════════════════════════════════════════════
 # Janela principal
-# ═════════════════════════════════════════════════════════════════════════════
 class NFSEGuiApp(ctk.CTk):
 
     def __init__(self) -> None:
@@ -177,7 +182,7 @@ class NFSEGuiApp(ctk.CTk):
         )
         self.after(60, self._show_splash)
 
-    # ── Splash ────────────────────────────────────────────────────────────────
+    # Splash
     def _show_splash(self) -> None:
         s = SplashOverlay(
             self,
@@ -193,7 +198,7 @@ class NFSEGuiApp(ctk.CTk):
             kind="info", duration_ms=3200,
         ))
 
-    # ── Construção da UI ──────────────────────────────────────────────────────
+    # Construção da UI
     def _build_ui(self) -> None:
         # Páginas empilhadas
         self.grid_rowconfigure(0, weight=1)
@@ -209,9 +214,7 @@ class NFSEGuiApp(ctk.CTk):
         self._page_main.tkraise()
         self._current_page = "main"
 
-    # ══════════════════════════════════════════════════════════════════════════
     # PÁGINA PRINCIPAL
-    # ══════════════════════════════════════════════════════════════════════════
     def _make_main_page(self) -> ctk.CTkFrame:
         root = ctk.CTkScrollableFrame(self, fg_color=P.bg_app, scrollbar_button_color=P.border)
         root.grid_columnconfigure(0, weight=1)
@@ -224,7 +227,7 @@ class NFSEGuiApp(ctk.CTk):
 
         return root
 
-    # ── 1. HEADER ─────────────────────────────────────────────────────────────
+    # 1. HEADER
     def _build_header(self, parent: ctk.CTkScrollableFrame) -> None:
         header = ctk.CTkFrame(parent, fg_color=P.header, corner_radius=0, height=64)
         header.grid(row=0, column=0, sticky="ew")
@@ -283,7 +286,7 @@ class NFSEGuiApp(ctk.CTk):
         _hbtn("Configurações", lambda: self._nav("config")).pack(side="left", padx=4)
         _hbtn("Sobre",         lambda: self._nav("sobre")).pack(side="left", padx=4)
 
-    # ── 2. STATS CARDS ────────────────────────────────────────────────────────
+    # 2. STATS CARDS
     def _build_stats(self, parent: ctk.CTkScrollableFrame) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.grid(row=1, column=0, sticky="ew", padx=24, pady=(20, 0))
@@ -314,7 +317,7 @@ class NFSEGuiApp(ctk.CTk):
         )
         self._card_sucesso.grid(row=0, column=2, sticky="ew", padx=(8, 0))
 
-    # ── 3. PAINEL CENTRAL DE CONTROLE ─────────────────────────────────────────
+    # 3. PAINEL CENTRAL DE CONTROLE
     def _build_control(self, parent: ctk.CTkScrollableFrame) -> None:
         card = ctk.CTkFrame(
             parent,
@@ -435,7 +438,7 @@ class NFSEGuiApp(ctk.CTk):
 
         self._toggle_dates()
 
-    # ── 4. DUAS COLUNAS (Settings | Logs) ────────────────────────────────────
+    # 4. DUAS COLUNAS (Settings | Logs)
     def _build_bottom(self, parent: ctk.CTkScrollableFrame) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.grid(row=3, column=0, sticky="nsew", padx=24, pady=(0, 8))
@@ -630,7 +633,7 @@ class NFSEGuiApp(ctk.CTk):
             inner.tag_configure(lv, foreground=clr)
         inner.tag_configure("TS", foreground=P.text_secondary)
 
-    # ── 5. RODAPÉ COM DICA ────────────────────────────────────────────────────
+    # 5. RODAPÉ COM DICA
     def _build_footer(self, parent: ctk.CTkScrollableFrame) -> None:
         footer = ctk.CTkFrame(
             parent,
@@ -655,9 +658,7 @@ class NFSEGuiApp(ctk.CTk):
         )
         self._tip_lbl.grid(row=0, column=1, sticky="w", pady=12)
 
-    # ══════════════════════════════════════════════════════════════════════════
     # PÁGINA CONFIGURAÇÕES
-    # ══════════════════════════════════════════════════════════════════════════
     def _make_config_page(self) -> ctk.CTkFrame:
         root = ctk.CTkFrame(self, fg_color=P.bg_app)
         root.grid_rowconfigure(1, weight=1)
@@ -797,9 +798,7 @@ class NFSEGuiApp(ctk.CTk):
 
         return root
 
-    # ══════════════════════════════════════════════════════════════════════════
     # PÁGINA SOBRE
-    # ══════════════════════════════════════════════════════════════════════════
     def _make_sobre_page(self) -> ctk.CTkFrame:
         root = ctk.CTkFrame(self, fg_color=P.bg_app)
         root.grid_rowconfigure(1, weight=1)
@@ -867,16 +866,14 @@ class NFSEGuiApp(ctk.CTk):
 
         return root
 
-    # ── Navegação ─────────────────────────────────────────────────────────────
+    # Navegação
     def _nav(self, page: str) -> None:
         m = {"main": self._page_main, "config": self._page_config, "sobre": self._page_sobre}
         if page in m:
             m[page].tkraise()
             self._current_page = page
 
-    # ══════════════════════════════════════════════════════════════════════════
     # LÓGICA DE EXECUÇÃO
-    # ══════════════════════════════════════════════════════════════════════════
     def _on_run(self) -> None:
         if self.running:
             return
@@ -911,14 +908,14 @@ class NFSEGuiApp(ctk.CTk):
         status = "ok"
         total = ok = 0
         try:
-            from nfse_automacao import preparar_parametros, executar_local
+            from app.automation.nfse_automacao import preparar_parametros, executar_local
             params = preparar_parametros(dt_ini, dt_fim, cnpjs)
             resultados = executar_local(params, cancel_event=self.cancel_ev)
             total = len(resultados)
             ok    = sum(1 for r in resultados if r.status == "ok")
 
             if self._chk_email.get():
-                from nfse_automacao import montar_mensagem, notificar_email
+                from app.automation.nfse_automacao import montar_mensagem, notificar_email
                 msg = montar_mensagem(resultados, params)
                 notificar_email(msg["assunto"], msg["mensagem"])
 
@@ -989,9 +986,7 @@ class NFSEGuiApp(ctk.CTk):
         self._hdr_status_lbl.configure(text=text, text_color=color)
         self._hdr_pulse.set_color(color)
 
-    # ══════════════════════════════════════════════════════════════════════════
     # LOGS
-    # ══════════════════════════════════════════════════════════════════════════
     def _setup_logging(self) -> None:
         h = QueueLogHandler(self.log_queue)
         h.setLevel(logging.DEBUG)
@@ -1059,9 +1054,7 @@ class NFSEGuiApp(ctk.CTk):
     def _set_log_filter(self, val: str) -> None:
         self._log_filter = val
 
-    # ══════════════════════════════════════════════════════════════════════════
     # CONFIGURAÇÕES
-    # ══════════════════════════════════════════════════════════════════════════
     def _save_config(self) -> None:
         if not CONFIG_PATH.exists():
             messagebox.showerror("Erro", "config.py não encontrado.", parent=self)
@@ -1123,7 +1116,7 @@ class NFSEGuiApp(ctk.CTk):
         if val:
             var.set(val)
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # Helpers
     def _toggle_dates(self) -> None:
         st = "disabled" if self._use_prev_month.get() else "normal"
         self._dt_start.configure(state=st)
@@ -1179,7 +1172,7 @@ class NFSEGuiApp(ctk.CTk):
         self.destroy()
 
 
-# ── Entrypoint ────────────────────────────────────────────────────────────────
+# Entrypoint
 def main() -> None:
     app = NFSEGuiApp()
     app.mainloop()

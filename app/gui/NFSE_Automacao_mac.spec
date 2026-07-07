@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
 Spec PyInstaller para NFSe Automacao - macOS (.app bundle)
-Uso: pyinstaller --noconfirm NFSE_Automacao_mac.spec
+Uso (a partir da raiz do projeto): pyinstaller --noconfirm app/gui/NFSE_Automacao_mac.spec
 Gera: dist/NFSe_Automacao.app
 """
 import sys
@@ -9,11 +9,12 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 SPEC_DIR = Path(SPECPATH)
+ROOT_DIR = SPEC_DIR.parent.parent
 
 import playwright as _pw
 PW_DIR = Path(_pw.__file__).parent
 
-# ── Dados ──────────────────────────────────────────────────────────────────────
+# Dados
 datas = []
 datas += collect_data_files("customtkinter")
 datas += collect_data_files("tkcalendar")
@@ -22,7 +23,7 @@ datas += collect_data_files("babel")
 # Driver Playwright (node + package/) — necessario para controlar Chrome
 datas += [(str(PW_DIR / "driver"), "playwright/driver")]
 
-# ── Imports ocultos ────────────────────────────────────────────────────────────
+# Imports ocultos
 hiddenimports = []
 hiddenimports += collect_submodules("babel")
 hiddenimports += collect_submodules("playwright")
@@ -33,23 +34,23 @@ hiddenimports += [
     "cryptography", "cryptography.hazmat.primitives",
     "cryptography.hazmat.backends.openssl",
     "openpyxl", "openpyxl.styles", "openpyxl.utils",
-    "cert_reader", "nfse_automacao", "dominio_importer",
-    "ui_widgets", "ui_animations",
-    "runtime_settings",
+    "app.automation.cert_reader", "app.automation.nfse_automacao",
+    "app.automation.dominio_importer",
+    "app.gui.ui_widgets", "app.gui.ui_animations",
 ]
 
-# ── Arquivos do projeto ────────────────────────────────────────────────────────
+# Arquivos do projeto
 project_datas = [
-    (str(SPEC_DIR / "runtime_settings.json"), "."),
+    (str(ROOT_DIR / "runtime_settings.json"), "."),
 ]
 for f in project_datas:
     if Path(f[0]).exists():
         datas.append(f)
 
-# ── Analise ────────────────────────────────────────────────────────────────────
+# Analise
 a = Analysis(
     [str(SPEC_DIR / "gui_app.py")],
-    pathex=[str(SPEC_DIR)],
+    pathex=[str(ROOT_DIR)],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
@@ -97,7 +98,7 @@ app = BUNDLE(
     coll,
     name="NFSe_Automacao.app",
     icon=None,                  # coloque "icone.icns" aqui se tiver
-    bundle_identifier="br.com.conx.nfse-automacao",
+    bundle_identifier="br.com.znx.nfse-automacao",
     info_plist={
         "CFBundleName": "NFSe Automacao",
         "CFBundleDisplayName": "NFSe Automacao",

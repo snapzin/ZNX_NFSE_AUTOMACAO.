@@ -27,7 +27,7 @@ log = logging.getLogger("nfse")
 _DOMINIO_PROFILE_DIR = Path(config.PASTA_SAIDA).parent / "dominio-profile"
 
 
-# ── Popup de credenciais ──────────────────────────────────────────────────────
+# Popup de credenciais
 
 def pedir_credenciais(empresa_nome: str, cnpj: str) -> tuple[str, str] | None:
     """
@@ -114,7 +114,7 @@ def pedir_credenciais(empresa_nome: str, cnpj: str) -> tuple[str, str] | None:
         return None
 
 
-# ── Importador principal ──────────────────────────────────────────────────────
+# Importador principal
 
 class DominioImporter:
     """Automatiza a importação de XMLs NFS-e no Domínio Web via Playwright."""
@@ -211,7 +211,7 @@ class DominioImporter:
             finally:
                 ctx.close()
 
-    # ── Etapas ───────────────────────────────────────────────────────────────
+    # Etapas
 
     @staticmethod
     def _coletar_xmls(pastas: list[Path]) -> list[Path]:

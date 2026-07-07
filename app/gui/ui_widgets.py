@@ -10,7 +10,7 @@ from typing import Callable
 import customtkinter as ctk  # type: ignore[import-untyped]
 import tkinter as tk
 
-from ui_animations import (
+from app.gui.ui_animations import (
     Tween,
     ease_in_out_cubic,
     ease_out_back,

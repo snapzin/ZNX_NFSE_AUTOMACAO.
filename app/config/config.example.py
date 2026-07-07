@@ -1,8 +1,6 @@
-# =============================================================================
-# config.example.py — Copie para config.py e preencha com seus dados reais.
-#   cp config.example.py config.py
+# config.example.py — Copie para config.py, na raiz do projeto, e preencha com seus dados reais.
+#   cp app/config/config.example.py config.py
 # O arquivo config.py está no .gitignore e nunca vai para o repositório.
-# =============================================================================
 
 # CAMINHOS LOCAIS
 # Padrao: caminhos relativos a pasta do projeto.

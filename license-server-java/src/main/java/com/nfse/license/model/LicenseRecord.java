@@ -1,4 +1,4 @@
-package com.conx.license.model;
+package com.nfse.license.model;
 
 import jakarta.persistence.*;
 

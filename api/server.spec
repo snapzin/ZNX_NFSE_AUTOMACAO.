@@ -40,9 +40,10 @@ hiddenimports += [
     "openpyxl", "openpyxl.styles", "openpyxl.utils",
     "h11", "h11._readers", "h11._writers",
     "email.mime.multipart", "email.mime.text",
-    "nfse_automacao", "cert_reader", "dominio_importer", "config_defaults",
-    "adn_client", "relatorio",
-    "path_finder", "runtime_settings",
+    "app.automation.nfse_automacao", "app.automation.cert_reader",
+    "app.automation.dominio_importer", "app.config.config_defaults",
+    "app.automation.adn_client", "app.reports.relatorio",
+    "app.automation.path_finder",
 ]
 
 # ── Análise ────────────────────────────────────────────────────────────────────

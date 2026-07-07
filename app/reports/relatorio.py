@@ -72,7 +72,7 @@ _RESUMO_IMPOSTOS = [
 ]
 
 
-# ───────────────────────── parsing do XML ───────────────────────────
+# parsing do XML
 
 def _localname(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
@@ -157,7 +157,7 @@ def extrair_nota(xml_path: Path, situacao: str = "") -> dict | None:
     }
 
 
-# ───────────────────────── montagem do Excel ────────────────────────
+# montagem do Excel
 
 _HDR_FILL = PatternFill("solid", fgColor="1F4E78")
 _HDR_FONT = Font(bold=True, color="FFFFFF")

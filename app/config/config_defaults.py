@@ -18,7 +18,8 @@ def license_admin_url() -> str:
 def project_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
+    # app/config/config_defaults.py -> sobe 2 niveis ate a raiz do projeto
+    return Path(__file__).resolve().parents[2]
 
 
 def default_values() -> dict[str, object]:
@@ -231,7 +232,7 @@ def apply_defaults(
     # Roda ANTES de resolver PATH_KEYS para preservar o caminho absoluto achado.
     if auto_discover:
         try:
-            import path_finder
+            from app.automation import path_finder
 
             # Startup nunca abre dialogo: detecta automaticamente ou deixa em
             # branco (o frontend pergunta na 1a execucao). Evita travar o boot

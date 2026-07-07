@@ -8,14 +8,15 @@ import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
-# ── Caminhos base ──────────────────────────────────────────────────────────────
+# Caminhos base: spec fica em app/gui/, a raiz real do projeto e 2 niveis acima.
 SPEC_DIR = Path(SPECPATH)
+ROOT_DIR = SPEC_DIR.parent.parent
 
 # Localiza o playwright instalado no Python ativo
 import playwright as _pw
 PW_DIR = Path(_pw.__file__).parent
 
-# ── Dados a incluir no bundle ──────────────────────────────────────────────────
+# Dados a incluir no bundle
 datas = []
 datas += collect_data_files("customtkinter")
 datas += collect_data_files("tkcalendar")
@@ -24,7 +25,7 @@ datas += collect_data_files("babel")
 # Driver do Playwright (node.exe + package/) — necessário para controle do Chrome
 datas += [(str(PW_DIR / "driver"), "playwright/driver")]
 
-# ── Imports ocultos ────────────────────────────────────────────────────────────
+# Imports ocultos
 hiddenimports = []
 hiddenimports += collect_submodules("babel")
 hiddenimports += collect_submodules("playwright")
@@ -35,25 +36,26 @@ hiddenimports += [
     "cryptography", "cryptography.hazmat.primitives",
     "cryptography.hazmat.backends.openssl",
     "openpyxl", "openpyxl.styles", "openpyxl.utils",
-    # módulos do projeto (exceto config.py — fica externo)
-    "cert_reader", "nfse_automacao", "dominio_importer", "adn_client", "relatorio",
-    "ui_widgets", "ui_animations",
-    "runtime_settings",
+    # modulos do projeto (exceto config.py — fica externo)
+    "app.automation.cert_reader", "app.automation.nfse_automacao",
+    "app.automation.dominio_importer", "app.automation.adn_client",
+    "app.reports.relatorio",
+    "app.gui.ui_widgets", "app.gui.ui_animations",
 ]
 
-# ── Arquivos do projeto a incluir como dado ────────────────────────────────────
+# Arquivos do projeto a incluir como dado
 project_datas = [
-    (str(SPEC_DIR / "runtime_settings.json"), "."),
+    (str(ROOT_DIR / "runtime_settings.json"), "."),
 ]
 # Inclui apenas se existir
 for f in project_datas:
     if Path(f[0]).exists():
         datas.append(f)
 
-# ── Análise ────────────────────────────────────────────────────────────────────
+# Analise
 a = Analysis(
     [str(SPEC_DIR / "gui_app.py")],
-    pathex=[str(SPEC_DIR)],
+    pathex=[str(ROOT_DIR)],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,

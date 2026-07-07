@@ -1,5 +1,5 @@
 param(
-    [string]$InstallRoot = "C:\Users\conxc\AppData\Local\Programs\NFSe Automacao",
+    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\NFSe Automacao"),
     [switch]$WaitForExit
 )
 

@@ -53,7 +53,7 @@ _TRANSIENT = {429, 502, 503, 504}
 _TIMEOUT = (30, 120)  # (connect, read) — a 1a leitura pode demorar (mTLS + lote)
 
 
-# ───────────────────────── certificado mTLS ─────────────────────────
+# certificado mTLS
 
 def pfx_para_pem(pfx_path: Path, senha: str) -> tuple[bytes, bytes]:
     """Converte um .pfx em (cert_pem, key_pem) na memoria, sem tocar no disco.
@@ -74,7 +74,7 @@ def pfx_para_pem(pfx_path: Path, senha: str) -> tuple[bytes, bytes]:
     return cert_pem, key_pem
 
 
-# ───────────────────────── parsing do XML ───────────────────────────
+# parsing do XML
 
 def _localname(tag: str) -> str:
     """Remove o namespace de uma tag ElementTree ('{ns}Nome' -> 'Nome')."""
@@ -180,7 +180,7 @@ def parse_evento(xml_str: str) -> Optional[tuple[str, str, bool]]:
     return chave, tp_evento, eh_cancelamento
 
 
-# ───────────────────────── utilitarios ──────────────────────────────
+# utilitarios
 
 def _so_digitos(s: str) -> str:
     return re.sub(r"\D", "", s or "")
@@ -237,7 +237,7 @@ def _nome_evento_cancel(numero_nota: str, chave: str, nsu) -> str:
     return _sanitizar(base) + ".xml"
 
 
-# ───────────────────────── loop de download ─────────────────────────
+# loop de download
 
 @dataclass
 class ResultadoADN:
@@ -393,10 +393,9 @@ def baixar_dfe(
 
         destino = Path(destino)
 
-        # ── PASSO 1: percorre a caixa inteira, separando notas dos eventos e
-        #            mapeando quais notas foram CANCELADAS (o evento de
-        #            cancelamento vem depois da nota, com NSU maior — por isso
-        #            precisamos de dois passos). ────────────────────────────
+        # PASSO 1: percorre a caixa inteira, separando notas dos eventos e
+        # mapeando quais notas foram CANCELADAS (o evento de cancelamento
+        # vem depois da nota, com NSU maior — por isso precisamos de dois passos).
         notas = []                 # (nsu, chave, xml, meta)
         eventos_cancel = []        # (nsu, chave_afetada, xml)
         chaves_canceladas = set()
@@ -434,7 +433,7 @@ def baixar_dfe(
             if chave and meta:
                 chave_para_meta[chave] = meta
 
-        # ── PASSO 2: salva. Apenas 3 pastas: Emitidas, Recebidas, Canceladas. ──
+        # PASSO 2: salva. Apenas 3 pastas: Emitidas, Recebidas, Canceladas.
         def _no_periodo(comp: str) -> bool:
             return competencias is None or comp in competencias
 
@@ -469,8 +468,8 @@ def baixar_dfe(
             elif tipo == "Outros":
                 res.nao_classificados += 1   # sem dono claro -> nao salva (mantem 3 pastas)
 
-        # ── PASSO 3: guarda o XML do evento de cancelamento junto, em Canceladas
-        #            (mesma competencia da nota cancelada). ──────────────────
+        # PASSO 3: guarda o XML do evento de cancelamento junto, em Canceladas
+        # (mesma competencia da nota cancelada).
         for nsu, chave_af, xml in eventos_cancel:
             meta_nota = chave_para_meta.get(chave_af)
             comp = meta_nota.competencia_mes if meta_nota else ""

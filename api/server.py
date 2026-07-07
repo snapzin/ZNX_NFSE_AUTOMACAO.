@@ -36,7 +36,7 @@ else:
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
-    from config_defaults import apply_defaults, default_values, ensure_config_file
+    from app.config.config_defaults import apply_defaults, default_values, ensure_config_file
 except ImportError as e:
     logger.warning(f"Falha ao importar config_defaults: {e}")
     apply_defaults = None
@@ -60,7 +60,7 @@ except ImportError:
         apply_defaults(config, create_dirs=False)
 
 try:
-    from cert_reader import listar_certificados, indexar_certificados_por_cnpj
+    from app.automation.cert_reader import listar_certificados, indexar_certificados_por_cnpj
 except ImportError as e:
     logger.warning(f"Falha ao importar cert_reader: {e}. Usando fallback.")
     def listar_certificados(*args, **kwargs):
@@ -69,7 +69,7 @@ except ImportError as e:
         return {}, {}
 
 try:
-    from nfse_automacao import ExecucaoCancelada, executar_local, preparar_parametros
+    from app.automation.nfse_automacao import ExecucaoCancelada, executar_local, preparar_parametros
 except ImportError as e:
     logger.warning(f"Falha ao importar nfse_automacao: {e}. Usando fallback.")
     ExecucaoCancelada = RuntimeError
@@ -392,7 +392,7 @@ async def paths_status():
     as pastas detectadas (certificados no Google Drive, DOMINIO WEB local).
     """
     try:
-        import path_finder as pf
+        from app.automation import path_finder as pf
     except Exception:
         pf = None
 

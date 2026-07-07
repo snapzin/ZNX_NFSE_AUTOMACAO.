@@ -53,7 +53,7 @@ $distPath = Join-Path $projectRoot "dist"
 $buildPath = Join-Path $projectRoot "build"
 $distFallbackPath = Join-Path $projectRoot "dist_build"
 $buildFallbackPath = Join-Path $projectRoot "build_build"
-$specPath = Join-Path $projectRoot "NFSE_Automacao.spec"
+$specPath = Join-Path $projectRoot "app\gui\NFSE_Automacao.spec"
 $distPathForBuild = $distPath
 $buildPathForBuild = $buildPath
 

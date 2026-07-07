@@ -37,7 +37,7 @@ echo.
 
 REM ── Compila com PyInstaller ───────────────────────────────────────
 echo [3/4] Compilando... (pode levar 2-5 minutos)
-python -m PyInstaller NFSE_Automacao.spec --noconfirm --clean
+python -m PyInstaller app\gui\NFSE_Automacao.spec --noconfirm --clean
 if errorlevel 1 (
     echo.
     echo [ERRO] Falha na compilacao. Veja as mensagens acima.

@@ -65,19 +65,24 @@ dist/NFSE_Automacao.exe
 
 ### Via Terminal (debug)
 ```bash
-python nfse_automacao.py  # Executa com mês anterior
+python -m app.automation.nfse_automacao  # Executa com mês anterior
 ```
 
 ## 📊 Fluxo de Dados
 
+Código Python organizado em `app/` por responsabilidade: `app/config/`
+(config_defaults, templates), `app/automation/` (motor + certificados),
+`app/gui/` (interface Tkinter), `app/reports/` (relatórios Excel),
+`app/dev_tools/` (utilitários de desenvolvimento).
+
 ```
 Certificados .pfx
     ↓
-cert_reader.py → extrai CNPJ, CN, thumbprint
+app/automation/cert_reader.py → extrai CNPJ, CN, thumbprint
     ↓
-gui_app.py (splash → cards → form → logs)
+app/gui/gui_app.py (splash → cards → form → logs)
     ↓
-nfse_automacao.py
+app/automation/nfse_automacao.py
     ├→ NFSePlaywrightRunner (Playwright)
     │  ├→ login com certificado (AutoSelectCertificateForUrls)
     │  ├→ aplica filtros (período)
@@ -127,7 +132,7 @@ nfse_automacao.py
 ```bash
 git pull  # pega novos códigos
 pip install -r requirements.txt --upgrade
-pyinstaller --noconfirm NFSE_Automacao.spec  # rebuild .exe
+pyinstaller --noconfirm app/gui/NFSE_Automacao.spec  # rebuild .exe
 ```
 
 ---
