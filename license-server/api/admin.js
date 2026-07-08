@@ -15,10 +15,11 @@ import {
   getRecord, saveRecord, deleteRecord, listRecords,
   normalizeKey, formatKey, genKey, setCors, setSecurityHeaders, redis,
   rateLimit, clientIp, normalizeAdminUser, getAdminUser, saveAdminUser,
-  deleteAdminUser, listAdminUsers,
+  deleteAdminUser, listAdminUsers, buildLicenseRecord, safeEqual,
 } from './_lib.js';
 
 const PASSWORD_ITERATIONS = 150000;
+const BILLING_STATUS_VALIDOS = new Set(['manual', 'em_dia', 'atrasado', 'cancelado']);
 
 function isMachineBlocked(machine) {
   return machine?.status === 'blocked';
@@ -26,13 +27,6 @@ function isMachineBlocked(machine) {
 
 function activeMachineCount(machines) {
   return Object.values(machines || {}).filter((m) => !isMachineBlocked(m)).length;
-}
-
-function safeEqual(a, b) {
-  const left = Buffer.from(String(a || ''));
-  const right = Buffer.from(String(b || ''));
-  if (left.length !== right.length) return false;
-  return crypto.timingSafeEqual(left, right);
 }
 
 function hashPassword(password) {
@@ -133,6 +127,7 @@ export default async function handler(req, res) {
         billingStatus: r.billingStatus || 'manual',
         plano: r.plano || '',
         asaasCustomerId: r.asaasCustomerId || '',
+        asaasSubscriptionId: r.asaasSubscriptionId || '',
       }));
       items.sort((a, b) => (a.clientName || '').localeCompare(b.clientName || ''));
       return res.status(200).json({ ok: true, total: items.length, items });
@@ -187,19 +182,15 @@ export default async function handler(req, res) {
     if (op === 'create') {
       let k = body.key ? normalizeKey(body.key) : genKey();
       if (await getRecord(k)) return res.status(409).json({ ok: false, message: 'Chave ja existe.' });
-      const rec = {
-        clientName: String(body.clientName || '').trim(),
-        status: 'active',
-        maxMachines: Math.max(1, Number(body.maxMachines || 1)),
-        machines: {},
+      // Licenca criada manualmente no painel: sem cobranca automatica vinculada.
+      const rec = buildLicenseRecord({
+        clientName: body.clientName,
+        maxMachines: body.maxMachines,
         expiresAt: daysToExpiry(body.days) ?? null,
-        createdAt: new Date().toISOString(),
-        lastSeen: null,
-        notes: String(body.notes || ''),
-        // Licenca criada manualmente no painel: sem cobranca automatica vinculada.
+        notes: body.notes,
+        plano: body.plano,
         billingStatus: 'manual',
-        plano: String(body.plano || ''),
-      };
+      });
       await saveRecord(k, rec);
       return res.status(200).json({ ok: true, key: k, keyFmt: formatKey(k), record: rec });
     }
@@ -213,7 +204,16 @@ export default async function handler(req, res) {
       if (body.maxMachines !== undefined) rec.maxMachines = Math.max(1, Number(body.maxMachines));
       if (body.notes !== undefined) rec.notes = String(body.notes);
       if (body.plano !== undefined) rec.plano = String(body.plano);
-      if (body.billingStatus !== undefined) rec.billingStatus = String(body.billingStatus);
+      if (body.billingStatus !== undefined) {
+        const valor = String(body.billingStatus);
+        if (!BILLING_STATUS_VALIDOS.has(valor)) {
+          return res.status(400).json({
+            ok: false,
+            message: `billingStatus invalido. Opcoes: ${[...BILLING_STATUS_VALIDOS].join(', ')}`,
+          });
+        }
+        rec.billingStatus = valor;
+      }
       if (body.expiresAt !== undefined) rec.expiresAt = body.expiresAt || null;
       else {
         const e = daysToExpiry(body.days);
@@ -228,6 +228,10 @@ export default async function handler(req, res) {
       const rec = await getRecord(k);
       if (!rec) return res.status(404).json({ ok: false, message: 'Chave nao encontrada.' });
       rec.status = op === 'block' ? 'blocked' : 'active';
+      // Bloqueio feito aqui no painel e SEMPRE manual (sem blockedReason) —
+      // o webhook da Asaas so reativa sozinho bloqueios que ele mesmo fez
+      // (blockedReason:'billing'). Desbloquear aqui limpa qualquer marcacao antiga.
+      if (op === 'unblock') delete rec.blockedReason;
       await saveRecord(k, rec);
       return res.status(200).json({ ok: true, status: rec.status });
     }

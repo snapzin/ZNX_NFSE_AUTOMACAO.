@@ -6,11 +6,13 @@
 //
 // Configuracao no painel da Asaas: Integracoes -> Webhooks -> aponta pra esta
 // URL e define o "Token de autenticacao" = mesmo valor de ASAAS_WEBHOOK_TOKEN.
-import crypto from 'crypto';
+//
+// Chamado servidor-a-servidor pela Asaas (nao pelo navegador do cliente),
+// entao nao usa setCors — nao ha origem de browser pra liberar aqui.
 import {
-  getRecord, saveRecord, genKey, formatKey, setSecurityHeaders,
-  getLicenseKeyBySubscription, linkSubscriptionToKey,
-  getPendingSignup, deletePendingSignup,
+  getRecord, saveRecord, genKey, formatKey, setSecurityHeaders, safeEqual,
+  buildLicenseRecord, getLicenseKeyBySubscription, linkSubscriptionToKey,
+  getPendingSignup, deletePendingSignup, eventoAsaasJaProcessado,
   rateLimit, clientIp,
 } from './_lib.js';
 import { enviarChaveLicenca } from './_mail.js';
@@ -19,19 +21,11 @@ const CONFIRMED_EVENTS = new Set(['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED']);
 const OVERDUE_EVENTS = new Set(['PAYMENT_OVERDUE']);
 const CANCELLED_EVENTS = new Set(['SUBSCRIPTION_DELETED', 'PAYMENT_DELETED', 'PAYMENT_REFUNDED']);
 
-// Dias adicionados a expiresAt a cada confirmacao, por ciclo — com margem de
-// alguns dias sobre o ciclo nominal (grace contra pequeno atraso no envio do webhook).
-const CYCLE_DAYS = {
-  WEEKLY: 9, BIWEEKLY: 16, MONTHLY: 35, BIMONTHLY: 65,
-  QUARTERLY: 95, SEMIANNUALLY: 185, YEARLY: 370,
-};
-
-function safeEqual(a, b) {
-  const left = Buffer.from(String(a || ''));
-  const right = Buffer.from(String(b || ''));
-  if (left.length !== right.length) return false;
-  return crypto.timingSafeEqual(left, right);
-}
+// Unico ciclo oferecido hoje (ver signup.js: cycle sempre 'MONTHLY'), e o
+// payload real da Asaas para eventos de pagamento nao traz o ciclo da
+// assinatura de volta — entao nao ha como (nem por que, por ora) diferenciar
+// por ciclo. Quando um 2o ciclo for vendido, isso vira um mapa por 'plano'.
+const GRACE_DAYS = 35;
 
 function authorized(req) {
   const expected = String(process.env.ASAAS_WEBHOOK_TOKEN || '').trim();
@@ -40,15 +34,33 @@ function authorized(req) {
   return safeEqual(got, expected);
 }
 
-async function criarOuRenovar(subscriptionId, cycle) {
-  const dias = CYCLE_DAYS[String(cycle || 'MONTHLY').toUpperCase()] || CYCLE_DAYS.MONTHLY;
-  const novaExpiracao = new Date(Date.now() + dias * 86400_000).toISOString();
+// A Asaas manda o subscription id dentro de `payment.subscription` nos
+// eventos de pagamento (PAYMENT_*), mas em eventos de ciclo de vida da
+// assinatura (ex.: SUBSCRIPTION_DELETED) ele vem em `subscription.id` (ou
+// `subscription` como string), SEM objeto `payment`. Checa os dois formatos.
+function extrairSubscriptionId(body) {
+  const doPayment = body?.payment?.subscription;
+  if (doPayment) return doPayment;
+  const sub = body?.subscription;
+  if (typeof sub === 'string') return sub;
+  if (sub?.id) return sub.id;
+  return '';
+}
+
+async function criarOuRenovar(subscriptionId) {
+  const novaExpiracao = new Date(Date.now() + GRACE_DAYS * 86400_000).toISOString();
 
   const chaveExistente = await getLicenseKeyBySubscription(subscriptionId);
   if (chaveExistente) {
     const rec = await getRecord(chaveExistente);
     if (!rec) return null;
-    rec.status = 'active';
+    // So reativa sozinho um bloqueio que o PROPRIO webhook fez por atraso/
+    // cancelamento (blockedReason:'billing'). Bloqueio manual do admin (ex.:
+    // fraude) fica intacto — o pagamento so atualiza a parte de cobranca.
+    if (rec.status !== 'blocked' || rec.blockedReason === 'billing') {
+      rec.status = 'active';
+      delete rec.blockedReason;
+    }
     rec.billingStatus = 'em_dia';
     rec.expiresAt = novaExpiracao;
     await saveRecord(chaveExistente, rec);
@@ -61,23 +73,22 @@ async function criarOuRenovar(subscriptionId, cycle) {
   const pending = await getPendingSignup(subscriptionId);
   if (!pending) return null;
 
-  const key = genKey();
-  const rec = {
-    clientName: pending.clientName || '',
-    status: 'active',
-    maxMachines: Math.max(1, Number(pending.maxMachines || 1)),
-    machines: {},
+  let key = genKey();
+  for (let tentativas = 0; tentativas < 3 && (await getRecord(key)); tentativas += 1) {
+    key = genKey(); // colisao e ~impossivel (32^16 chaves), mas e barato conferir
+  }
+  const rec = buildLicenseRecord({
+    clientName: pending.clientName,
+    maxMachines: pending.maxMachines,
     expiresAt: novaExpiracao,
-    createdAt: new Date().toISOString(),
-    lastSeen: null,
-    notes: pending.notes || '',
-    asaasCustomerId: pending.asaasCustomerId || '',
-    asaasSubscriptionId: subscriptionId,
-    plano: pending.plano || '',
+    notes: pending.notes,
+    plano: pending.plano,
     billingStatus: 'em_dia',
-  };
-  await saveRecord(key, rec);
-  await linkSubscriptionToKey(subscriptionId, key);
+    asaasCustomerId: pending.asaasCustomerId,
+    asaasSubscriptionId: subscriptionId,
+  });
+
+  await Promise.all([saveRecord(key, rec), linkSubscriptionToKey(subscriptionId, key)]);
   await deletePendingSignup(subscriptionId);
 
   if (pending.email) {
@@ -98,7 +109,10 @@ async function marcarStatus(subscriptionId, billingStatus, bloquear) {
   const rec = await getRecord(key);
   if (!rec) return null;
   rec.billingStatus = billingStatus;
-  if (bloquear) rec.status = 'blocked';
+  if (bloquear) {
+    rec.status = 'blocked';
+    rec.blockedReason = 'billing';
+  }
   await saveRecord(key, rec);
   return { key, rec };
 }
@@ -119,8 +133,14 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
   const event = String(body.event || '');
-  const payment = body.payment || {};
-  const subscriptionId = payment.subscription || '';
+  const subscriptionId = extrairSubscriptionId(body);
+
+  // A Asaas reentrega o mesmo evento em caso de timeout/erro — sem isso, um
+  // retry de PAYMENT_CONFIRMED criaria/renovaria a licenca duas vezes.
+  const eventId = String(body.id || '');
+  if (eventId && (await eventoAsaasJaProcessado(eventId))) {
+    return res.status(200).json({ ok: true, deduped: true });
+  }
 
   if (!subscriptionId) {
     // Evento sem subscription (ex.: cobranca avulsa) — nada a sincronizar aqui.
@@ -129,7 +149,7 @@ export default async function handler(req, res) {
 
   try {
     if (CONFIRMED_EVENTS.has(event)) {
-      const r = await criarOuRenovar(subscriptionId, payment.cycle || body?.subscription?.cycle);
+      const r = await criarOuRenovar(subscriptionId);
       return res.status(200).json({ ok: true, action: r ? (r.novo ? 'created' : 'renewed') : 'ignored' });
     }
 

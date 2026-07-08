@@ -94,8 +94,8 @@ async function enviar(ev) {
     if (!r.ok || !d.ok) throw new Error(d.message || 'Falha ao criar assinatura.');
 
     msg.className = 'ok';
-    msg.innerHTML = 'Cadastro criado! Conclua o pagamento para ativar sua licença — '
-      + 'a chave será enviada por e-mail assim que o pagamento for confirmado.';
+    msg.innerHTML = (d.message || 'Cadastro criado!')
+      + ' A chave será enviada por e-mail assim que o pagamento for confirmado.';
     if (d.invoiceUrl) {
       const a = document.createElement('a');
       a.href = d.invoiceUrl; a.target = '_blank'; a.rel = 'noopener';

@@ -150,6 +150,13 @@
       <h3 style="margin-top:0">➕ Nova licença</h3>
       <div class="row">
         <div class="fld" style="flex:2"><label>Cliente / empresa</label><input id="c_name" placeholder="Ex.: Luz em Foco" /></div>
+        <div class="fld"><label>Plano</label>
+          <select id="c_plano" style="width:110px">
+            <option value="">—</option>
+            <option value="basico">Básico</option>
+            <option value="pro">Pro</option>
+          </select>
+        </div>
         <div class="fld"><label>Máquinas</label><input id="c_max" type="number" min="1" value="1" style="width:90px" /></div>
         <div class="fld"><label>Validade (dias, vazio = sem)</label><input id="c_days" type="number" min="1" placeholder="∞" style="width:150px" /></div>
         <div class="fld" style="flex:1"><label>Chave (vazio = gerar)</label><input id="c_key" placeholder="auto" /></div>
@@ -362,12 +369,13 @@ function bindRowActions(root) {
 
 async function criar() {
   const clientName=document.getElementById('c_name').value.trim();
+  const plano=document.getElementById('c_plano').value;
   const maxMachines=Number(document.getElementById('c_max').value||1);
   const daysRaw=document.getElementById('c_days').value;
   const key=document.getElementById('c_key').value.trim();
   if(!clientName){ toast('Informe o cliente.'); return; }
-  try { const d = await api('create',{clientName,maxMachines,days:daysRaw===''?null:Number(daysRaw),key:key||undefined});
-    document.getElementById('c_name').value=''; document.getElementById('c_days').value=''; document.getElementById('c_key').value='';
+  try { const d = await api('create',{clientName,plano,maxMachines,days:daysRaw===''?null:Number(daysRaw),key:key||undefined});
+    document.getElementById('c_name').value=''; document.getElementById('c_plano').value=''; document.getElementById('c_days').value=''; document.getElementById('c_key').value='';
     await navigator.clipboard?.writeText(d.keyFmt).catch(()=>{});
     toast('Criada: '+d.keyFmt+' (copiada)'); carregar();
   } catch(e){ toast('Erro: '+e.message); }
@@ -380,8 +388,10 @@ async function editar(key){
   const it = DATA.find(x=>x.key===key); if(!it) return;
   const name = prompt('Cliente:', it.clientName||''); if(name===null) return;
   const max = prompt('Máximo de máquinas:', it.maxMachines); if(max===null) return;
+  const plano = prompt('Plano (basico/pro/vazio):', it.plano||''); if(plano===null) return;
+  const billingStatus = prompt('Cobrança (manual/em_dia/atrasado/cancelado):', it.billingStatus||'manual'); if(billingStatus===null) return;
   const days = prompt('Validade em dias a partir de AGORA (vazio = manter; 0 = sem validade):',''); if(days===null) return;
-  const extra = { key, clientName:name, maxMachines:Number(max) };
+  const extra = { key, clientName:name, maxMachines:Number(max), plano, billingStatus };
   if (days!=='') extra.days = Number(days)===0 ? null : Number(days);
   try{ await api('update', extra); toast('Atualizada.'); carregar(); }catch(e){ toast('Erro: '+e.message);} }
 function copiar(txt){ navigator.clipboard?.writeText(txt); toast('Chave copiada: '+txt); }

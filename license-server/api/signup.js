@@ -45,17 +45,17 @@ export default async function handler(req, res) {
   const planoKey = String(body.plano || '').trim().toLowerCase();
   const plano = PLANOS[planoKey];
 
-  if (!clientName || !email) {
-    return res.status(400).json({ ok: false, message: 'Informe ao menos o nome do escritorio e o e-mail.' });
+  if (!clientName) {
+    return res.status(400).json({ ok: false, message: 'Informe o nome do escritorio.' });
+  }
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return res.status(400).json({ ok: false, message: 'E-mail invalido.' });
   }
   if (cnpj.length !== 14 && cnpj.length !== 11) {
     return res.status(400).json({ ok: false, message: 'CNPJ/CPF invalido.' });
   }
   if (!plano) {
     return res.status(400).json({ ok: false, message: `Plano invalido. Opcoes: ${Object.keys(PLANOS).join(', ')}` });
-  }
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    return res.status(400).json({ ok: false, message: 'E-mail invalido.' });
   }
 
   try {
@@ -68,27 +68,30 @@ export default async function handler(req, res) {
       description: `TaBatido — plano ${plano.label}`,
     });
 
-    await savePendingSignup(subscription.id, {
-      clientName,
-      email,
-      maxMachines: plano.maxMachines,
-      plano: planoKey,
-      asaasCustomerId: customer.id,
-      notes: `Signup autoatendimento (CNPJ/CPF ${cnpj})`,
-      createdAt: new Date().toISOString(),
-    });
+    // As duas chamadas abaixo sao independentes (nenhuma usa o resultado da
+    // outra) — rodam em paralelo pra nao somar as duas latencias na resposta.
+    const [, primeiraCobranca] = await Promise.all([
+      savePendingSignup(subscription.id, {
+        clientName,
+        email,
+        maxMachines: plano.maxMachines,
+        plano: planoKey,
+        asaasCustomerId: customer.id,
+        notes: `Signup autoatendimento (CNPJ/CPF ${cnpj})`,
+        createdAt: new Date().toISOString(),
+      }),
+      subscription.invoiceUrl ? Promise.resolve(null) : getFirstPayment(subscription.id).catch(() => null),
+    ]);
 
-    let invoiceUrl = subscription.invoiceUrl || '';
-    if (!invoiceUrl) {
-      const primeiraCobranca = await getFirstPayment(subscription.id).catch(() => null);
-      invoiceUrl = primeiraCobranca?.invoiceUrl || '';
-    }
+    const invoiceUrl = subscription.invoiceUrl || primeiraCobranca?.invoiceUrl || '';
 
     return res.status(200).json({
       ok: true,
       subscriptionId: subscription.id,
       invoiceUrl,
-      message: 'Cadastro criado. Conclua o pagamento para ativar sua licenca.',
+      message: invoiceUrl
+        ? 'Cadastro criado. Conclua o pagamento para ativar sua licenca.'
+        : 'Cadastro criado. A Asaas vai enviar o link de pagamento por e-mail — confira sua caixa de entrada.',
     });
   } catch (err) {
     console.error('signup error:', err?.message);

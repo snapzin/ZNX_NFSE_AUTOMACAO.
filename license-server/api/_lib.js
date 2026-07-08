@@ -1,6 +1,7 @@
 ﻿// Biblioteca compartilhada do servidor de licencas.
 // Banco: Upstash Redis (Vercel Marketplace -> Upstash, plano gratuito).
 // Env necessarias: UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
+import crypto from 'crypto';
 import { Redis } from '@upstash/redis';
 
 let _redis = null;
@@ -87,6 +88,11 @@ export function genKey() {
 // { clientName, status: "active"|"blocked", maxMachines,
 //   machines: {<id>:{firstSeen,lastSeen,status:"active"|"blocked",blockedAt?}},
 //   expiresAt: ISO|null, createdAt: ISO, notes,
+//   // 'blockedReason' so existe quando status é "blocked": "billing" (o
+//   // proprio webhook bloqueou por atraso/cancelamento — pode reativar
+//   // sozinho num pagamento confirmado) ou ausente (bloqueio manual do
+//   // admin — o webhook NUNCA reativa esse sozinho).
+//   blockedReason?: "billing",
 //   // Cobranca (Asaas) — presentes so em licencas criadas via signup/webhook:
 //   asaasCustomerId?, asaasSubscriptionId?, plano?,
 //   billingStatus?: "manual"|"em_dia"|"atrasado"|"cancelado" }
@@ -222,6 +228,58 @@ export async function deletePendingSignup(subId) {
   const r = redis();
   if (!r) return;
   await r.del(asaasPendingPath(subId));
+}
+
+// Deduplicacao de webhooks da Asaas: ela reentrega em caso de timeout/erro,
+// entao o mesmo evento pode chegar mais de uma vez. Marca-e-checa atomico via
+// SET NX; TTL de 7 dias cobre a janela de retry da Asaas com folga.
+const asaasEventPath = (eventId) => `asaas:event:${eventId}`;
+
+export async function eventoAsaasJaProcessado(eventId) {
+  const r = redis();
+  if (!r || !eventId) return false; // sem Redis/id: nao da pra deduplicar, segue normalmente
+  const resultado = await r.set(asaasEventPath(eventId), '1', { nx: true, ex: 7 * 86400 });
+  return resultado !== 'OK'; // 'OK' = 1a vez (marcado agora); null = ja existia (duplicado)
+}
+
+// Monta o registro de uma licenca nova com os valores padrao — usado tanto
+// pela criacao manual (admin.js) quanto pela criacao via 1o pagamento
+// confirmado (asaas-webhook.js), pra nao ter duas formas de montar o mesmo
+// formato e correrem o risco de divergir.
+export function buildLicenseRecord({
+  clientName = '',
+  maxMachines = 1,
+  expiresAt = null,
+  notes = '',
+  plano = '',
+  billingStatus = 'manual',
+  asaasCustomerId = '',
+  asaasSubscriptionId = '',
+} = {}) {
+  return {
+    clientName: String(clientName || '').trim(),
+    status: 'active',
+    maxMachines: Math.max(1, Number(maxMachines || 1)),
+    machines: {},
+    expiresAt: expiresAt || null,
+    createdAt: new Date().toISOString(),
+    lastSeen: null,
+    notes: String(notes || ''),
+    plano: String(plano || ''),
+    billingStatus,
+    asaasCustomerId: String(asaasCustomerId || ''),
+    asaasSubscriptionId: String(asaasSubscriptionId || ''),
+  };
+}
+
+// Comparacao de tempo constante (evita leak de timing em comparacao de
+// segredos: tokens de admin, de webhook, etc.) — compartilhada entre
+// admin.js e asaas-webhook.js.
+export function safeEqual(a, b) {
+  const left = Buffer.from(String(a || ''));
+  const right = Buffer.from(String(b || ''));
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
 }
 
 // Chaves legadas em VALID_KEYS (compatibilidade com a versao antiga).

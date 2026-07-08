@@ -76,5 +76,3 @@ export async function getFirstPayment(subscriptionId) {
   const data = await request(`/payments?subscription=${encodeURIComponent(subscriptionId)}&limit=1`);
   return (data.data && data.data[0]) || null;
 }
-
-export { baseUrl as _baseUrl };

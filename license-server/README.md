@@ -110,8 +110,10 @@ configuração recebida do Electron.
 
 ## 4. Usar o painel
 
-Abra `https://SEU-PROJETO.vercel.app/` → informe usuario e senha → 
+Abra `https://SEU-PROJETO.vercel.app/admin.html` → informe usuario e senha →
 crie licenças (gera a chave e copia), defina máquinas/validade, bloqueie/exclua.
+(A raiz `/` agora é a landing page pública de vendas — o painel administrativo
+mudou para `/admin.html`.)
 
 O usuario definido em `ADMIN_USER` / `ADMIN_PASS` na Vercel funciona como acesso
 root/de recuperacao. Pelo painel, use a secao **Usuarios admin** para criar

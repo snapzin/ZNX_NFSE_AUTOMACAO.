@@ -10,13 +10,19 @@ function smtpConfigured() {
   );
 }
 
+// Reaproveita a mesma conexao/pool entre invocacoes (lambda "morna") em vez
+// de recriar o transporter (e reautenticar no SMTP) a cada e-mail enviado.
+let _transporter = null;
 function transporter() {
-  return nodemailer.createTransport({
+  if (_transporter) return _transporter;
+  _transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 587),
     secure: String(process.env.SMTP_SECURE || '').trim() === '1',
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
+    pool: true,
   });
+  return _transporter;
 }
 
 export async function enviarChaveLicenca({ to, clientName, keyFmt, installerUrl }) {
