@@ -1,25 +1,14 @@
-// Autoatendimento: escritorio de contabilidade se cadastra e assina sozinho.
-// Cria customer + subscription na Asaas e devolve o link de pagamento
-// (boleto/PIX/cartao, conforme o proprio Asaas oferece na fatura). A LICENCA
-// so nasce quando o webhook (asaas-webhook.js) confirmar o 1o pagamento —
-// aqui so guardamos os dados do cadastro em "pending", ligados ao subscription id.
+// Autoatendimento: escritorio de contabilidade se cadastra e paga via PIX
+// direto na nossa pagina (sem redirecionar pra fora do site). Gera a 1a
+// cobranca PIX no Itau e devolve o codigo "copia e cola" na propria
+// resposta. A LICENCA so nasce quando o webhook (itau-webhook/[token].js)
+// confirmar o pagamento — aqui so guardamos os dados do cadastro em
+// "pending", ligados ao txid da cobranca.
 import {
-  setCors, setSecurityHeaders, rateLimit, clientIp, savePendingSignup,
+  setCors, setSecurityHeaders, rateLimit, clientIp, savePendingCharge,
 } from './_lib.js';
-import { createCustomer, createSubscription, getFirstPayment } from './asaas-client.js';
-
-// Planos definidos no servidor (nao confiar em valor vindo do cliente).
-// Ajuste os precos/limites conforme a estrategia comercial.
-const PLANOS = {
-  basico: { label: 'Basico', valor: 149.9, maxMachines: 1 },
-  pro: { label: 'Pro', valor: 249.9, maxMachines: 3 },
-};
-
-// Metodo de cobranca aceito no checkout. Comeca so em PIX (cartao exige
-// documentacao adicional aprovada na Asaas). Quando a conta Asaas estiver
-// habilitada pra cartao, mude ASAAS_BILLING_TYPE=UNDEFINED na Vercel (sem
-// precisar mexer em codigo) para liberar boleto/cartao tambem.
-const BILLING_TYPE = String(process.env.ASAAS_BILLING_TYPE || 'PIX').trim().toUpperCase();
+import { criarCobranca, gerarTxid } from './itau-client.js';
+import { PLANOS } from './planos.js';
 
 function apenasDigitos(v) {
   return String(v || '').replace(/\D/g, '');
@@ -41,7 +30,6 @@ export default async function handler(req, res) {
   const clientName = String(body.clientName || '').trim().slice(0, 200);
   const cnpj = apenasDigitos(body.cnpj);
   const email = String(body.email || '').trim().slice(0, 200);
-  const phone = apenasDigitos(body.phone);
   const planoKey = String(body.plano || '').trim().toLowerCase();
   const plano = PLANOS[planoKey];
 
@@ -59,42 +47,34 @@ export default async function handler(req, res) {
   }
 
   try {
-    const customer = await createCustomer({ name: clientName, cpfCnpj: cnpj, email, phone });
-    const subscription = await createSubscription({
-      customerId: customer.id,
-      value: plano.valor,
-      cycle: 'MONTHLY',
-      billingType: BILLING_TYPE,
-      description: `TaBatido — plano ${plano.label}`,
+    const txid = gerarTxid();
+    const cobranca = await criarCobranca({
+      txid,
+      valor: plano.valor,
+      cpfCnpj: cnpj,
+      nome: clientName,
+      expiracaoSegundos: 3600, // 1h pra pagar a 1a cobranca
     });
 
-    // As duas chamadas abaixo sao independentes (nenhuma usa o resultado da
-    // outra) — rodam em paralelo pra nao somar as duas latencias na resposta.
-    const [, primeiraCobranca] = await Promise.all([
-      savePendingSignup(subscription.id, {
-        clientName,
-        email,
-        maxMachines: plano.maxMachines,
-        plano: planoKey,
-        asaasCustomerId: customer.id,
-        notes: `Signup autoatendimento (CNPJ/CPF ${cnpj})`,
-        createdAt: new Date().toISOString(),
-      }),
-      subscription.invoiceUrl ? Promise.resolve(null) : getFirstPayment(subscription.id).catch(() => null),
-    ]);
-
-    const invoiceUrl = subscription.invoiceUrl || primeiraCobranca?.invoiceUrl || '';
+    await savePendingCharge(txid, {
+      clientName,
+      email,
+      cpfCnpj: cnpj,
+      maxMachines: plano.maxMachines,
+      plano: planoKey,
+      notes: `Signup autoatendimento (CNPJ/CPF ${cnpj})`,
+      createdAt: new Date().toISOString(),
+    });
 
     return res.status(200).json({
       ok: true,
-      subscriptionId: subscription.id,
-      invoiceUrl,
-      message: invoiceUrl
-        ? 'Cadastro criado. Conclua o pagamento para ativar sua licenca.'
-        : 'Cadastro criado. A Asaas vai enviar o link de pagamento por e-mail — confira sua caixa de entrada.',
+      txid,
+      pixCopiaECola: cobranca.pixCopiaECola,
+      valor: plano.valor,
+      message: 'Pague o PIX abaixo para ativar sua licenca — a chave chega por e-mail assim que confirmar.',
     });
   } catch (err) {
     console.error('signup error:', err?.message);
-    return res.status(502).json({ ok: false, message: `Falha ao criar assinatura na Asaas: ${err?.message || err}` });
+    return res.status(502).json({ ok: false, message: `Falha ao gerar cobranca PIX: ${err?.message || err}` });
   }
 }

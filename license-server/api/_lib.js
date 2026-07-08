@@ -93,15 +93,30 @@ export function genKey() {
 //   // sozinho num pagamento confirmado) ou ausente (bloqueio manual do
 //   // admin — o webhook NUNCA reativa esse sozinho).
 //   blockedReason?: "billing",
-//   // Cobranca (Asaas) — presentes so em licencas criadas via signup/webhook:
-//   asaasCustomerId?, asaasSubscriptionId?, plano?,
-//   billingStatus?: "manual"|"em_dia"|"atrasado"|"cancelado" }
+//   // Cobranca (Itau PIX) — presentes so em licencas criadas via signup/webhook:
+//   billingProvider?: "itau_pix", itauPayerDoc? (CPF/CNPJ de quem paga), email?,
+//   pendingChargeTxid?, pendingChargeAt? (cobranca de renovacao gerada e
+//   ainda nao paga — evita o cron gerar duplicada na mesma competencia),
+//   lastPaidTxid?, lastPaidAt? (ultimo pagamento confirmado),
+//   plano?, billingStatus?: "manual"|"em_dia"|"atrasado"|"cancelado" }
 export async function getRecord(k) {
   const r = redis();
   if (!r) return null;
   const rec = await r.get(keyPath(k));
   if (!rec) return null;
   return typeof rec === 'string' ? JSON.parse(rec) : rec;
+}
+
+// Gera uma chave de licenca garantindo que nao colide com uma ja existente
+// (colisao e ~impossivel com genKey() sozinho — 32^16 chaves — mas e barato
+// conferir). Usado por toda criacao de licenca (manual no admin.js, ou via
+// pagamento confirmado no itau-webhook/[token].js) pra ter a mesma garantia.
+export async function genUniqueKey() {
+  let key = genKey();
+  for (let tentativas = 0; tentativas < 3 && (await getRecord(key)); tentativas += 1) {
+    key = genKey();
+  }
+  return key;
 }
 
 export async function saveRecord(k, rec) {
@@ -188,63 +203,73 @@ export async function listAdminUsers() {
   return out;
 }
 
-// ── Indice assinatura Asaas -> chave de licenca ──────────────────────────────
-// Permite ao webhook achar a licenca certa a partir do subscription id, sem
+// ── Indice cobranca PIX (Itau) -> chave de licenca ───────────────────────────
+// Permite ao webhook achar a licenca certa a partir do txid da cobranca, sem
 // varrer todas as licencas.
-const asaasSubPath = (subId) => `asaas:sub:${subId}`;
+const itauTxidPath = (txid) => `itau:txid:${txid}`;
 
-export async function getLicenseKeyBySubscription(subId) {
+export async function getLicenseKeyByTxid(txid) {
   const r = redis();
-  if (!r || !subId) return null;
-  return (await r.get(asaasSubPath(subId))) || null;
+  if (!r || !txid) return null;
+  return (await r.get(itauTxidPath(txid))) || null;
 }
 
-export async function linkSubscriptionToKey(subId, key) {
+export async function linkTxidToKey(txid, key) {
   const r = redis();
   if (!r) throw new Error('Banco (Upstash Redis) nao configurado.');
-  await r.set(asaasSubPath(subId), key);
+  await r.set(itauTxidPath(txid), key);
 }
 
 // Dados do signup (clientName, maxMachines, plano, email) guardados entre a
-// criacao da subscription na Asaas e a confirmacao do 1o pagamento (webhook).
-// So depois do pagamento confirmado a licenca de fato nasce.
-const asaasPendingPath = (subId) => `asaas:pending:${subId}`;
+// criacao da 1a cobranca PIX e a confirmacao do pagamento (webhook). So
+// depois do pagamento confirmado a licenca de fato nasce.
+const itauPendingPath = (txid) => `itau:pending:${txid}`;
 
-export async function savePendingSignup(subId, data) {
+export async function savePendingCharge(txid, data) {
   const r = redis();
   if (!r) throw new Error('Banco (Upstash Redis) nao configurado.');
-  await r.set(asaasPendingPath(subId), JSON.stringify(data));
+  await r.set(itauPendingPath(txid), JSON.stringify(data));
 }
 
-export async function getPendingSignup(subId) {
+export async function getPendingCharge(txid) {
   const r = redis();
-  if (!r || !subId) return null;
-  const rec = await r.get(asaasPendingPath(subId));
+  if (!r || !txid) return null;
+  const rec = await r.get(itauPendingPath(txid));
   if (!rec) return null;
   return typeof rec === 'string' ? JSON.parse(rec) : rec;
 }
 
-export async function deletePendingSignup(subId) {
+export async function deletePendingCharge(txid) {
   const r = redis();
   if (!r) return;
-  await r.del(asaasPendingPath(subId));
+  await r.del(itauPendingPath(txid));
 }
 
-// Deduplicacao de webhooks da Asaas: ela reentrega em caso de timeout/erro,
-// entao o mesmo evento pode chegar mais de uma vez. Marca-e-checa atomico via
-// SET NX; TTL de 7 dias cobre a janela de retry da Asaas com folga.
-const asaasEventPath = (eventId) => `asaas:event:${eventId}`;
+// Deduplicacao de webhooks do Itau: reentregas em timeout/erro podem repetir
+// a mesma notificacao. Marca-e-checa atomico via SET NX; TTL de 7 dias cobre
+// a janela de retry com folga.
+const itauEventPath = (eventId) => `itau:event:${eventId}`;
 
-export async function eventoAsaasJaProcessado(eventId) {
+export async function eventoItauJaProcessado(eventId) {
   const r = redis();
   if (!r || !eventId) return false; // sem Redis/id: nao da pra deduplicar, segue normalmente
-  const resultado = await r.set(asaasEventPath(eventId), '1', { nx: true, ex: 7 * 86400 });
+  const resultado = await r.set(itauEventPath(eventId), '1', { nx: true, ex: 7 * 86400 });
   return resultado !== 'OK'; // 'OK' = 1a vez (marcado agora); null = ja existia (duplicado)
 }
 
+// Desfaz a marcacao de "ja processado". Chame isso se o processamento do
+// evento falhar DEPOIS de eventoItauJaProcessado ja ter marcado — senao o
+// reenvio da Itau fica preso como "duplicado" por 7 dias e o pagamento
+// nunca chega a criar/renovar a licenca, mesmo tendo sido confirmado pelo banco.
+export async function limparEventoProcessado(eventId) {
+  const r = redis();
+  if (!r || !eventId) return;
+  await r.del(itauEventPath(eventId));
+}
+
 // Monta o registro de uma licenca nova com os valores padrao — usado tanto
-// pela criacao manual (admin.js) quanto pela criacao via 1o pagamento
-// confirmado (asaas-webhook.js), pra nao ter duas formas de montar o mesmo
+// pela criacao manual (admin.js) quanto pela criacao via 1o pagamento PIX
+// confirmado (itau-webhook.js), pra nao ter duas formas de montar o mesmo
 // formato e correrem o risco de divergir.
 export function buildLicenseRecord({
   clientName = '',
@@ -253,8 +278,9 @@ export function buildLicenseRecord({
   notes = '',
   plano = '',
   billingStatus = 'manual',
-  asaasCustomerId = '',
-  asaasSubscriptionId = '',
+  billingProvider = '',
+  itauPayerDoc = '',
+  email = '',
 } = {}) {
   return {
     clientName: String(clientName || '').trim(),
@@ -267,14 +293,18 @@ export function buildLicenseRecord({
     notes: String(notes || ''),
     plano: String(plano || ''),
     billingStatus,
-    asaasCustomerId: String(asaasCustomerId || ''),
-    asaasSubscriptionId: String(asaasSubscriptionId || ''),
+    billingProvider: String(billingProvider || ''),
+    itauPayerDoc: String(itauPayerDoc || ''),
+    // E-mail do responsavel pela cobranca — so preenchido em licencas via
+    // Itau PIX (o billing-run precisa disso pra mandar a cobranca de
+    // renovacao). Licenca manual nao tem.
+    email: String(email || ''),
   };
 }
 
 // Comparacao de tempo constante (evita leak de timing em comparacao de
 // segredos: tokens de admin, de webhook, etc.) — compartilhada entre
-// admin.js e asaas-webhook.js.
+// admin.js, itau-webhook/[token].js e billing-run.js.
 export function safeEqual(a, b) {
   const left = Buffer.from(String(a || ''));
   const right = Buffer.from(String(b || ''));

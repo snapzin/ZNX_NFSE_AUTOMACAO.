@@ -13,7 +13,7 @@
 import crypto from 'crypto';
 import {
   getRecord, saveRecord, deleteRecord, listRecords,
-  normalizeKey, formatKey, genKey, setCors, setSecurityHeaders, redis,
+  normalizeKey, formatKey, genUniqueKey, setCors, setSecurityHeaders, redis,
   rateLimit, clientIp, normalizeAdminUser, getAdminUser, saveAdminUser,
   deleteAdminUser, listAdminUsers, buildLicenseRecord, safeEqual,
 } from './_lib.js';
@@ -126,8 +126,11 @@ export default async function handler(req, res) {
         notes: r.notes || '',
         billingStatus: r.billingStatus || 'manual',
         plano: r.plano || '',
-        asaasCustomerId: r.asaasCustomerId || '',
-        asaasSubscriptionId: r.asaasSubscriptionId || '',
+        billingProvider: r.billingProvider || '',
+        itauPayerDoc: r.itauPayerDoc || '',
+        lastPaidTxid: r.lastPaidTxid || '',
+        lastPaidAt: r.lastPaidAt || null,
+        pendingChargeTxid: r.pendingChargeTxid || '',
       }));
       items.sort((a, b) => (a.clientName || '').localeCompare(b.clientName || ''));
       return res.status(200).json({ ok: true, total: items.length, items });
@@ -180,8 +183,13 @@ export default async function handler(req, res) {
     }
 
     if (op === 'create') {
-      let k = body.key ? normalizeKey(body.key) : genKey();
-      if (await getRecord(k)) return res.status(409).json({ ok: false, message: 'Chave ja existe.' });
+      let k;
+      if (body.key) {
+        k = normalizeKey(body.key);
+        if (await getRecord(k)) return res.status(409).json({ ok: false, message: 'Chave ja existe.' });
+      } else {
+        k = await genUniqueKey();
+      }
       // Licenca criada manualmente no painel: sem cobranca automatica vinculada.
       const rec = buildLicenseRecord({
         clientName: body.clientName,
@@ -229,8 +237,9 @@ export default async function handler(req, res) {
       if (!rec) return res.status(404).json({ ok: false, message: 'Chave nao encontrada.' });
       rec.status = op === 'block' ? 'blocked' : 'active';
       // Bloqueio feito aqui no painel e SEMPRE manual (sem blockedReason) —
-      // o webhook da Asaas so reativa sozinho bloqueios que ele mesmo fez
-      // (blockedReason:'billing'). Desbloquear aqui limpa qualquer marcacao antiga.
+      // o webhook/cron do Itau so reativam sozinhos bloqueios que eles mesmos
+      // fizeram (blockedReason:'billing'). Desbloquear aqui limpa qualquer
+      // marcacao antiga.
       if (op === 'unblock') delete rec.blockedReason;
       await saveRecord(k, rec);
       return res.status(200).json({ ok: true, status: rec.status });

@@ -2,54 +2,85 @@
 
 Produto ZNX. Valida as licenças do app, oferece um **painel admin** para
 gerenciar clientes (criar/revogar chaves, limite de máquinas, validade, ver
-quem está ativo) e uma camada de **cobrança recorrente via Asaas** com dois
-caminhos de entrada de cliente: venda manual (você cria a licença no painel)
-e autoatendimento (escritório se cadastra e paga sozinho em `/assinar.html`).
+quem está ativo) e uma camada de **cobrança via PIX direto no Itaú** (API PIX
+Cobrança, padrão Banco Central) com dois caminhos de entrada de cliente:
+venda manual (você cria a licença no painel) e autoatendimento (escritório se
+cadastra e paga via PIX sozinho em `/assinar.html`).
 
 - `GET /` → site de vendas (landing page pública, preços, CTA)
 - `GET /admin.html` → painel admin (protegido por usuario/senha)
-- `GET /assinar.html` → página pública de autoatendimento (signup + checkout Asaas); aceita `?plano=basico|pro` pra vir pré-selecionado a partir da landing page
+- `GET /assinar.html` → página pública de autoatendimento (gera a cobrança PIX
+  e mostra o "copia e cola" na hora, sem redirecionar); aceita `?plano=basico|pro`
+  pra vir pré-selecionado a partir da landing page
 - `POST /api/validate` → usado pelo app (`{key, machine_id}` → `{valid, message}`)
 - `POST /api/clientes` → clientes salvos por licenca + maquina (`op: "get"|"save"`)
 - `POST /api/admin` → API de gerenciamento (headers `x-admin-user` e `x-admin-pass`)
-- `POST /api/signup` → autoatendimento: cria customer+subscription na Asaas e
-  devolve o link de pagamento (chamado pela página `/assinar.html`)
-- `POST /api/asaas-webhook` → recebido da Asaas quando um pagamento muda de
-  status; cria/renova/bloqueia a licença automaticamente (ver seção abaixo)
+- `POST /api/signup` → autoatendimento: gera a 1ª cobrança PIX no Itaú e
+  devolve o "copia e cola" (chamado pela página `/assinar.html`)
+- `POST /api/itau-webhook/<ITAU_WEBHOOK_TOKEN>` → recebido do Itaú quando um
+  PIX é recebido; cria/renova a licença automaticamente (ver seção abaixo)
+- `GET /api/billing-run` → disparado pelo Cron da Vercel todo dia; gera
+  cobranças PIX de renovação pra quem está perto de vencer
 
-## Cobrança recorrente (Asaas)
+## Cobrança via PIX direto (Itaú)
 
-1. Crie uma conta na Asaas (sandbox para testar: https://sandbox.asaas.com) e
-   gere uma API Key em Configurações → Integrações.
+> ⚠️ A implementação segue o padrão oficial do Banco Central para PIX
+> Cobrança (`PUT /pix/v2/cob/{txid}`, `GET /pix/v2/cob/{txid}`), que a
+> maioria dos bancos — Itaú incluso — segue de perto. **Confirme no Itaú
+> Developers** se a base URL/paths exatos batem com o que foi liberado pra
+> sua conta antes de ir pra produção; ajuste via `ITAU_API_BASE_URL` /
+> `ITAU_TOKEN_PATH` se precisar.
+
+1. No Itaú Developers, confirme o acesso liberado ao produto **PIX Cobrança**
+   (client_id/secret + certificado mTLS aprovados) e a sua **chave PIX**
+   recebedora.
 2. Configure as variáveis de ambiente na Vercel:
 
    | Variável | Valor |
    |---|---|
-   | `ASAAS_API_KEY` | API key da Asaas (sandbox ou produção) |
-   | `ASAAS_ENV` | `sandbox` ou `production` |
-   | `ASAAS_WEBHOOK_TOKEN` | token que você define; deve ser o mesmo cadastrado no webhook da Asaas |
-   | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `MAIL_FROM` | (opcional) para enviar a chave por e-mail quando a licença é criada |
+   | `ITAU_API_BASE_URL` | base da API (sandbox ou produção, conforme o Itaú Developers) |
+   | `ITAU_TOKEN_PATH` | (opcional) path do endpoint de token OAuth2; default `/api/oauth/token` |
+   | `ITAU_CLIENT_ID` / `ITAU_CLIENT_SECRET` | credenciais OAuth2 (client_credentials) |
+   | `ITAU_CERT_PEM` / `ITAU_KEY_PEM` | certificado + chave privada mTLS, em PEM (cole com `\n` escapado) |
+   | `ITAU_PIX_KEY` | a chave PIX que recebe os pagamentos |
+   | `ITAU_WEBHOOK_TOKEN` | token que você define; vira parte da própria URL do webhook (ver abaixo) |
+   | `CRON_SECRET` | token que a Vercel usa sozinha pra autenticar o disparo do Cron — só defina, não precisa configurar em lugar nenhum |
+   | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `MAIL_FROM` | (opcional) para enviar a chave/cobrança por e-mail |
    | `INSTALLER_URL` | (opcional) link do instalador, incluído no e-mail |
-   | `ASAAS_BILLING_TYPE` | (opcional) forma de cobrança do checkout. Padrão `PIX` — a conta Asaas normalmente libera cartão só depois da verificação de documentos; quando isso acontecer, mude para `UNDEFINED` (deixa o cliente escolher PIX/boleto/cartão na fatura) sem precisar mexer em código |
 
-3. No painel da Asaas: Integrações → Webhooks → nova URL apontando para
-   `https://SEU-PROJETO.vercel.app/api/asaas-webhook`, com o **Token de
-   autenticação** igual a `ASAAS_WEBHOOK_TOKEN`. Marque pelo menos os eventos
-   `PAYMENT_CONFIRMED`, `PAYMENT_RECEIVED`, `PAYMENT_OVERDUE`,
-   `SUBSCRIPTION_DELETED`, `PAYMENT_DELETED`, `PAYMENT_REFUNDED`.
+3. No Itaú Developers, registre o webhook de notificação de PIX apontando
+   para:
+   ```
+   https://SEU-PROJETO.vercel.app/api/itau-webhook/<ITAU_WEBHOOK_TOKEN>
+   ```
+   (o token fica na própria URL — o padrão PIX do Bacen não define um
+   esquema de assinatura de payload tipo Stripe/Asaas). **Nota de segurança**:
+   por ficar na URL, esse token tende a aparecer em logs de acesso (da
+   própria Vercel, de qualquer proxy/CDN na frente) — mais exposto que um
+   header. É a única opção viável dado o padrão PIX; trate os logs de
+   acesso do projeto como sensíveis por causa disso.
 4. Os planos (nome, preço, limite de máquinas) ficam definidos em
-   `api/signup.js` (`PLANOS`) — o valor cobrado nunca vem do formulário do
-   cliente, sempre do servidor.
-5. Fluxo: `assinar.html` → `POST /api/signup` (cria customer+subscription na
-   Asaas, guarda um registro "pending" ligado ao `subscriptionId`) → cliente
-   paga no link da Asaas → Asaas chama `POST /api/asaas-webhook` →
-   `PAYMENT_CONFIRMED`/`PAYMENT_RECEIVED` gera a licença de verdade (ou renova
-   uma existente), `PAYMENT_OVERDUE` marca `billingStatus: "atrasado"` (sem
-   bloquear — é uma folga), `SUBSCRIPTION_DELETED`/`PAYMENT_DELETED`/
-   `PAYMENT_REFUNDED` bloqueia a licença.
-6. Venda manual (fora do autoatendimento): continue usando `op: "create"` no
+   `api/planos.js` (`PLANOS`) — usado tanto pelo signup quanto pela
+   renovação automática; o valor cobrado nunca vem do formulário do cliente.
+5. Fluxo (1ª cobrança): `assinar.html` → `POST /api/signup` (gera uma
+   cobrança PIX via `api/itau-client.js`, guarda um registro "pending"
+   ligado ao `txid`) → cliente paga colando o código no app do banco → Itaú
+   chama `POST /api/itau-webhook/<token>` → a licença nasce de verdade.
+6. Fluxo (renovação mensal): o Cron (`GET /api/billing-run`, todo dia às
+   12h UTC) varre licenças com `billingProvider: "itau_pix"` e, pra quem
+   está a **5 dias ou menos** do vencimento sem cobrança pendente ainda
+   válida, gera uma nova cobrança PIX e manda por e-mail. Se passar do
+   vencimento sem pagar, marca `billingStatus: "atrasado"`; depois de
+   **~10 dias** de atraso (a checagem roda 1x/dia, então o corte exato varia
+   um pouco conforme o horário do vencimento), bloqueia a licença
+   (`blockedReason: "billing"` — só esse bloqueio é revertido
+   automaticamente por um pagamento; bloqueio manual do admin nunca é
+   revertido pelo webhook/cron). Todas as políticas (dias de antecedência,
+   folga de atraso, validade da cobrança) ficam centralizadas em
+   `api/planos.js` (`BILLING_POLICY`).
+7. Venda manual (fora do autoatendimento): continue usando `op: "create"` no
    painel admin normalmente — essas licenças ficam com `billingStatus:
-   "manual"` e nunca são tocadas pelo webhook.
+   "manual"` e nunca são tocadas pelo webhook/cron.
 
 ---
 
@@ -132,5 +163,11 @@ outros usuarios; eles ficam salvos no Redis com senha hashada.
 ## Modelo de dados (Redis)
 
 - `lic:index` (set) → todas as chaves
-- `lic:<CHAVE>` (json) → `{ clientName, status, maxMachines, machines, expiresAt, createdAt, lastSeen, notes }`
+- `lic:<CHAVE>` (json) → `{ clientName, status, maxMachines, machines, expiresAt,
+  createdAt, lastSeen, notes, blockedReason?, plano, billingStatus,
+  billingProvider, itauPayerDoc, email, pendingChargeTxid?, pendingChargeAt?,
+  lastPaidTxid?, lastPaidAt? }`
 - `clientes:<HASH_CHAVE>:<MACHINE_ID>` (json) → `{ clientes, updatedAt }`
+- `itau:txid:<TXID>` (string) → chave da licença (índice txid → licença)
+- `itau:pending:<TXID>` (json) → dados do cadastro aguardando confirmação do 1º pagamento
+- `itau:event:<EVENT_ID>` (string, TTL 7 dias) → dedupe de notificações reentregues pelo Itaú

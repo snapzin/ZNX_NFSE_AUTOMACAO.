@@ -54,3 +54,34 @@ export async function enviarChaveLicenca({ to, clientName, keyFmt, installerUrl 
     return false;
   }
 }
+
+export async function enviarCobrancaPix({ to, clientName, copiaECola, valor }) {
+  if (!smtpConfigured() || !to) {
+    console.warn('[mail] SMTP nao configurado ou destinatario ausente — cobranca PIX nao enviada por e-mail.');
+    return false;
+  }
+  const linhas = [
+    `Ola, ${clientName || ''}!`.trim(),
+    '',
+    `Sua cobranca do TaBatido no valor de R$ ${Number(valor).toFixed(2)} esta pronta.`,
+    '',
+    'Copie o codigo PIX abaixo e cole no app do seu banco (PIX Copia e Cola):',
+    '',
+    copiaECola,
+    '',
+    'Assim que o pagamento for confirmado, sua licenca continua ativa automaticamente.',
+  ].filter(Boolean);
+
+  try {
+    await transporter().sendMail({
+      from: process.env.MAIL_FROM,
+      to,
+      subject: 'Cobranca PIX — TaBatido',
+      text: linhas.join('\n'),
+    });
+    return true;
+  } catch (err) {
+    console.error('[mail] Falha ao enviar cobranca PIX:', err?.message);
+    return false;
+  }
+}
