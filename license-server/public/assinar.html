@@ -32,6 +32,8 @@
   .pix-codigo { background:#0f0f11; border:1px solid var(--line); border-radius:8px; padding:12px;
                 font-family:ui-monospace,Consolas,monospace; font-size:12px; word-break:break-all;
                 color:var(--txt2); margin-bottom:12px; max-height:120px; overflow-y:auto; }
+  .pix-qr { display:block; margin:0 auto 16px; width:200px; height:200px; border-radius:8px;
+            background:#fff; padding:8px; }
   .hidden { display:none; }
 </style>
 </head>
@@ -61,7 +63,8 @@
 
   <div id="pix" class="card hidden">
     <div class="pix-valor" id="pixValor"></div>
-    <p class="sub" style="margin-bottom:8px">Copie o código abaixo e cole no Pix Copia e Cola do app do seu banco:</p>
+    <img id="pixQr" class="pix-qr hidden" alt="QR code do PIX" />
+    <p class="sub" style="margin-bottom:8px">Escaneie o QR code ou copie o código abaixo e cole no Pix Copia e Cola do app do seu banco:</p>
     <div class="pix-codigo" id="pixCodigo"></div>
     <button onclick="copiarPix()">Copiar código PIX</button>
     <button class="ghost" onclick="location.reload()">Assinar outro plano</button>
@@ -111,6 +114,13 @@ async function enviar(ev) {
     PIX_COPIA_COLA = d.pixCopiaECola || '';
     document.getElementById('pixValor').textContent = 'R$ ' + Number(d.valor || 0).toFixed(2).replace('.', ',');
     document.getElementById('pixCodigo').textContent = PIX_COPIA_COLA;
+    const pixQr = document.getElementById('pixQr');
+    if (d.qrCodeDataUrl) {
+      pixQr.src = d.qrCodeDataUrl;
+      pixQr.classList.remove('hidden');
+    } else {
+      pixQr.classList.add('hidden');
+    }
     document.getElementById('form').classList.add('hidden');
     document.getElementById('pix').classList.remove('hidden');
   } catch (e) {

@@ -10,13 +10,14 @@ cadastra e paga via PIX sozinho em `/assinar.html`).
 - `GET /` → site de vendas (landing page pública, preços, CTA)
 - `GET /admin.html` → painel admin (protegido por usuario/senha)
 - `GET /assinar.html` → página pública de autoatendimento (gera a cobrança PIX
-  e mostra o "copia e cola" na hora, sem redirecionar); aceita `?plano=basico|pro`
-  pra vir pré-selecionado a partir da landing page
+  e mostra o QR code + "copia e cola" na hora, sem redirecionar); aceita
+  `?plano=basico|pro` pra vir pré-selecionado a partir da landing page
 - `POST /api/validate` → usado pelo app (`{key, machine_id}` → `{valid, message}`)
 - `POST /api/clientes` → clientes salvos por licenca + maquina (`op: "get"|"save"`)
 - `POST /api/admin` → API de gerenciamento (headers `x-admin-user` e `x-admin-pass`)
 - `POST /api/signup` → autoatendimento: gera a 1ª cobrança PIX no Itaú e
-  devolve o "copia e cola" (chamado pela página `/assinar.html`)
+  devolve o "copia e cola" + a imagem do QR code (base64, gerada com o pacote
+  `qrcode`) na mesma resposta (chamado pela página `/assinar.html`)
 - `POST /api/itau-webhook/<ITAU_WEBHOOK_TOKEN>` → recebido do Itaú quando um
   PIX é recebido; cria/renova a licença automaticamente (ver seção abaixo)
 - `GET /api/billing-run` → disparado pelo Cron da Vercel todo dia; gera

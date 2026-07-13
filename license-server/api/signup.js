@@ -4,6 +4,7 @@
 // resposta. A LICENCA so nasce quando o webhook (itau-webhook/[token].js)
 // confirmar o pagamento — aqui so guardamos os dados do cadastro em
 // "pending", ligados ao txid da cobranca.
+import QRCode from 'qrcode';
 import {
   setCors, setSecurityHeaders, rateLimit, clientIp, savePendingCharge,
 } from './_lib.js';
@@ -66,10 +67,21 @@ export default async function handler(req, res) {
       createdAt: new Date().toISOString(),
     });
 
+    // QR code e so um "atalho pra escanear" o mesmo copia-e-cola — se a
+    // geracao da imagem falhar por qualquer motivo, o pagamento continua
+    // possivel colando o codigo, entao isso nunca derruba o signup.
+    let qrCodeDataUrl = '';
+    try {
+      qrCodeDataUrl = await QRCode.toDataURL(cobranca.pixCopiaECola, { margin: 1, width: 240 });
+    } catch (err) {
+      console.warn('signup: falha ao gerar QR code (seguindo so com copia-e-cola):', err?.message);
+    }
+
     return res.status(200).json({
       ok: true,
       txid,
       pixCopiaECola: cobranca.pixCopiaECola,
+      qrCodeDataUrl,
       valor: plano.valor,
       message: 'Pague o PIX abaixo para ativar sua licenca — a chave chega por e-mail assim que confirmar.',
     });
