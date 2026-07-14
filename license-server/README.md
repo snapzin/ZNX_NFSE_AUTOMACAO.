@@ -25,22 +25,30 @@ cadastra e paga via PIX sozinho em `/assinar.html`).
 
 ## Cobrança via PIX direto (Itaú)
 
-> ⚠️ A implementação segue o padrão oficial do Banco Central para PIX
-> Cobrança (`PUT /pix/v2/cob/{txid}`, `GET /pix/v2/cob/{txid}`), que a
-> maioria dos bancos — Itaú incluso — segue de perto. **Confirme no Itaú
-> Developers** se a base URL/paths exatos batem com o que foi liberado pra
-> sua conta antes de ir pra produção; ajuste via `ITAU_API_BASE_URL` /
-> `ITAU_TOKEN_PATH` se precisar.
+Produto confirmado no Itaú Developers: **Recebimentos Pix**
+(`regulatorio-pix-v2`). URLs base reais (`api/itau-client.js` espera o path
+dos endpoints — `/cob/{txid}` etc. — SEM prefixo extra, já que a base abaixo
+termina em `/v2`):
 
-1. No Itaú Developers, confirme o acesso liberado ao produto **PIX Cobrança**
-   (client_id/secret + certificado mTLS aprovados) e a sua **chave PIX**
-   recebedora.
+- **Produção**: `https://pix-pj.api.itau.com/regulatorio-pix/v2`
+- **Sandbox**: `https://sandbox.devportal.itau.com.br/itau-ep9-api-regulatorio-pix-v2-externo/v2`
+
+> ⚠️ **Ainda não confirmado**: o path exato do endpoint de token OAuth2
+> (`ITAU_TOKEN_PATH`). A página do produto tem um botão "gerar token" que
+> resolve isso na hora pra teste manual, mas não necessariamente expõe a URL
+> real que o backend deve chamar — confira o link **"como começar"** na
+> página do produto (Itaú Developers → Recebimentos Pix) pra achar o
+> endpoint de autenticação documentado.
+
+1. No Itaú Developers, confirme que o client_id/secret usados são os do
+   produto **Recebimentos Pix** (não de outro produto/escopo) e pegue a sua
+   **chave PIX** recebedora.
 2. Configure as variáveis de ambiente na Vercel:
 
    | Variável | Valor |
    |---|---|
-   | `ITAU_API_BASE_URL` | base da API (sandbox ou produção, conforme o Itaú Developers) |
-   | `ITAU_TOKEN_PATH` | (opcional) path do endpoint de token OAuth2; default `/api/oauth/token` |
+   | `ITAU_API_BASE_URL` | uma das duas URLs base acima (sandbox pra testar, produção depois) |
+   | `ITAU_TOKEN_PATH` | path do endpoint de token OAuth2 — confirme como descrito acima antes de setar |
    | `ITAU_CLIENT_ID` / `ITAU_CLIENT_SECRET` | credenciais OAuth2 (client_credentials) |
    | `ITAU_CERT_PEM` / `ITAU_KEY_PEM` | certificado + chave privada mTLS, em PEM (cole com `\n` escapado) |
    | `ITAU_PIX_KEY` | a chave PIX que recebe os pagamentos |

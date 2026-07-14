@@ -1,14 +1,19 @@
-// Cliente mTLS + OAuth2 da API PIX Cobranca do Itau (segue o padrao oficial
-// do Banco Central que a maioria dos bancos implementa de perto — mas
-// CONFIRME no Itau Developers se a base URL/paths abaixo batem exatamente
-// com o que foi liberado pra sua conta antes de ir pra producao).
+// Cliente mTLS + OAuth2 da API "Recebimentos Pix" do Itau (confirmado no
+// Itau Developers, produto regulatorio-pix-v2):
+//   producao: https://pix-pj.api.itau.com/regulatorio-pix/v2
+//   sandbox:  https://sandbox.devportal.itau.com.br/itau-ep9-api-regulatorio-pix-v2-externo/v2
+// Os paths abaixo (/cob, /cob/{txid}) sao relativos a essa base — ela ja
+// termina em '/v2', entao NAO prefixe com '/pix/v2' de novo.
 //
 // Toda chamada (inclusive o token) usa o certificado mTLS — bancos que
 // seguem o padrao PIX do Bacen exigem isso em todo o fluxo, nao so no login.
 //
 // Variaveis de ambiente:
-//   ITAU_API_BASE_URL   - base da API (sandbox ou producao)
-//   ITAU_TOKEN_PATH      - path do endpoint de token (default abaixo)
+//   ITAU_API_BASE_URL   - uma das duas base URLs acima (sandbox ou producao)
+//   ITAU_TOKEN_PATH      - path do endpoint de token — AINDA NAO CONFIRMADO
+//                           contra a doc real (ver "como comecar" no Itau
+//                           Developers); default abaixo e um palpite, ajuste
+//                           se o login falhar
 //   ITAU_CLIENT_ID / ITAU_CLIENT_SECRET
 //   ITAU_CERT_PEM / ITAU_KEY_PEM  - certificado + chave privada em PEM (cole
 //                                    o conteudo com quebras de linha como
@@ -115,7 +120,7 @@ export async function criarCobranca({ txid, valor, cpfCnpj, nome, expiracaoSegun
 
   const cobranca = await authedRequest({
     method: 'PUT',
-    path: `/pix/v2/cob/${encodeURIComponent(txid)}`,
+    path: `/cob/${encodeURIComponent(txid)}`,
     body: {
       calendario: { expiracao: expiracaoSegundos },
       devedor,
@@ -138,7 +143,7 @@ export async function criarCobranca({ txid, valor, cpfCnpj, nome, expiracaoSegun
 }
 
 export async function consultarCobranca(txid) {
-  return authedRequest({ method: 'GET', path: `/pix/v2/cob/${encodeURIComponent(txid)}` });
+  return authedRequest({ method: 'GET', path: `/cob/${encodeURIComponent(txid)}` });
 }
 
 // txid: 26 a 35 caracteres alfanumericos (regra do Bacen para PIX Cobranca).
