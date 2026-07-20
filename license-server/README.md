@@ -18,8 +18,9 @@ cadastra e paga via PIX sozinho em `/assinar.html`).
 - `POST /api/signup` → autoatendimento: gera a 1ª cobrança PIX no Itaú e
   devolve o "copia e cola" + a imagem do QR code (base64, gerada com o pacote
   `qrcode`) na mesma resposta (chamado pela página `/assinar.html`)
-- `POST /api/itau-webhook/<ITAU_WEBHOOK_TOKEN>` → recebido do Itaú quando um
-  PIX é recebido; cria/renova a licença automaticamente (ver seção abaixo)
+- `POST /api/itau-webhook/<ITAU_WEBHOOK_TOKEN>/pix` → recebido do Itaú quando
+  um PIX é recebido; cria/renova a licença automaticamente (ver seção abaixo
+  — o sufixo `/pix` é acrescentado pela própria Itaú, não configure assim)
 - `GET /api/billing-run` → disparado pelo Cron da Vercel todo dia; gera
   cobranças PIX de renovação pra quem está perto de vencer
 
@@ -33,12 +34,25 @@ termina em `/v2`):
 - **Produção**: `https://pix-pj.api.itau.com/regulatorio-pix/v2`
 - **Sandbox**: `https://sandbox.devportal.itau.com.br/itau-ep9-api-regulatorio-pix-v2-externo/v2`
 
+**Autenticação das chamadas de negócio** (confirmado no spec OpenAPI oficial,
+`securitySchemes.APIGatewaySTSAuthorizer`) — **não é** o padrão
+`Authorization: Bearer <token>`. É um API Gateway com autorizador custom que
+exige três headers em toda chamada de `/cob`, `/cobv` etc.:
+
+| Header | Valor |
+|---|---|
+| `auth` | o access_token OAuth2, **sem** prefixo `Bearer ` |
+| `x-itau-apikey` | o próprio `ITAU_CLIENT_ID` (formato UUID) |
+| `x-itau-correlationID` | (opcional) UUID gerado por requisição, para rastreio — `api/itau-client.js` já gera isso sozinho |
+
+Isso já está implementado em `api/itau-client.js` (`authedRequest`).
+
 > ⚠️ **Ainda não confirmado**: o path exato do endpoint de token OAuth2
-> (`ITAU_TOKEN_PATH`). A página do produto tem um botão "gerar token" que
-> resolve isso na hora pra teste manual, mas não necessariamente expõe a URL
-> real que o backend deve chamar — confira o link **"como começar"** na
-> página do produto (Itaú Developers → Recebimentos Pix) pra achar o
-> endpoint de autenticação documentado.
+> (`ITAU_TOKEN_PATH`). O spec OpenAPI documenta a autenticação das chamadas
+> de negócio (acima) mas não o endpoint de emissão do token em si — confira
+> o link **"como começar"** na página do produto (Itaú Developers →
+> Recebimentos Pix) ou a aba "informações adicionais" pra achar isso
+> documentado.
 
 1. No Itaú Developers, confirme que o client_id/secret usados são os do
    produto **Recebimentos Pix** (não de outro produto/escopo) e pegue a sua
@@ -57,11 +71,17 @@ termina em `/v2`):
    | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `MAIL_FROM` | (opcional) para enviar a chave/cobrança por e-mail |
    | `INSTALLER_URL` | (opcional) link do instalador, incluído no e-mail |
 
-3. No Itaú Developers, registre o webhook de notificação de PIX apontando
+3. No Itaú Developers, registre o webhook (`PUT /webhook/{chave}`) apontando
    para:
    ```
    https://SEU-PROJETO.vercel.app/api/itau-webhook/<ITAU_WEBHOOK_TOKEN>
    ```
+   **Importante** (confirmado no spec oficial): a Itaú acrescenta o sufixo
+   `/pix` sozinha na URL cadastrada — a notificação de verdade chega em
+   `.../itau-webhook/<TOKEN>/pix`. Por isso o handler mora em
+   `api/itau-webhook/[token]/pix.js`, não em `[token].js`. Não cadastre a URL
+   já com `/pix` no fim.
+
    (o token fica na própria URL — o padrão PIX do Bacen não define um
    esquema de assinatura de payload tipo Stripe/Asaas). **Nota de segurança**:
    por ficar na URL, esse token tende a aparecer em logs de acesso (da
@@ -74,7 +94,7 @@ termina em `/v2`):
 5. Fluxo (1ª cobrança): `assinar.html` → `POST /api/signup` (gera uma
    cobrança PIX via `api/itau-client.js`, guarda um registro "pending"
    ligado ao `txid`) → cliente paga colando o código no app do banco → Itaú
-   chama `POST /api/itau-webhook/<token>` → a licença nasce de verdade.
+   chama `POST /api/itau-webhook/<token>/pix` → a licença nasce de verdade.
 6. Fluxo (renovação mensal): o Cron (`GET /api/billing-run`, todo dia às
    12h UTC) varre licenças com `billingProvider: "itau_pix"` e, pra quem
    está a **5 dias ou menos** do vencimento sem cobrança pendente ainda

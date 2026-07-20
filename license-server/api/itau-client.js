@@ -1,9 +1,16 @@
-// Cliente mTLS + OAuth2 da API "Recebimentos Pix" do Itau (confirmado no
-// Itau Developers, produto regulatorio-pix-v2):
+// Cliente mTLS + OAuth2 da API "Recebimentos Pix" do Itau — confirmado
+// direto no spec OpenAPI oficial (itau-ep9-api-regulatorio-pix-v2-externo):
 //   producao: https://pix-pj.api.itau.com/regulatorio-pix/v2
 //   sandbox:  https://sandbox.devportal.itau.com.br/itau-ep9-api-regulatorio-pix-v2-externo/v2
 // Os paths abaixo (/cob, /cob/{txid}) sao relativos a essa base — ela ja
 // termina em '/v2', entao NAO prefixe com '/pix/v2' de novo.
+//
+// Autenticacao das chamadas de negocio (confirmado no spec, "securitySchemes"
+// -> APIGatewaySTSAuthorizer): NAO e o padrao "Authorization: Bearer <token>".
+// E um API Gateway com autorizador custom que exige TRES headers:
+//   auth              - o access_token OAuth2, sem prefixo "Bearer "
+//   x-itau-apikey     - o ITAU_CLIENT_ID (mesmo formato UUID)
+//   x-itau-correlationID (opcional) - UUID gerado por requisicao, p/ rastreio
 //
 // Toda chamada (inclusive o token) usa o certificado mTLS — bancos que
 // seguem o padrao PIX do Bacen exigem isso em todo o fluxo, nao so no login.
@@ -11,15 +18,17 @@
 // Variaveis de ambiente:
 //   ITAU_API_BASE_URL   - uma das duas base URLs acima (sandbox ou producao)
 //   ITAU_TOKEN_PATH      - path do endpoint de token — AINDA NAO CONFIRMADO
-//                           contra a doc real (ver "como comecar" no Itau
-//                           Developers); default abaixo e um palpite, ajuste
-//                           se o login falhar
+//                           contra a doc real (o spec OpenAPI nao documenta o
+//                           endpoint de token em si, so a autenticacao das
+//                           chamadas de negocio); default abaixo e um palpite,
+//                           ajuste se o login falhar
 //   ITAU_CLIENT_ID / ITAU_CLIENT_SECRET
 //   ITAU_CERT_PEM / ITAU_KEY_PEM  - certificado + chave privada em PEM (cole
 //                                    o conteudo com quebras de linha como
 //                                    "\n" escapado na env var da Vercel)
 //   ITAU_PIX_KEY         - a chave PIX que recebe os pagamentos
 import https from 'node:https';
+import crypto from 'node:crypto';
 
 const BASE_URL = String(process.env.ITAU_API_BASE_URL || '').replace(/\/+$/, '');
 const TOKEN_PATH = String(process.env.ITAU_TOKEN_PATH || '/api/oauth/token');
@@ -108,7 +117,16 @@ export async function getAccessToken() {
 
 async function authedRequest(opts) {
   const token = await getAccessToken();
-  return httpsJson({ ...opts, headers: { Authorization: `Bearer ${token}`, ...(opts.headers || {}) } });
+  const clientId = process.env.ITAU_CLIENT_ID || '';
+  return httpsJson({
+    ...opts,
+    headers: {
+      auth: token,
+      'x-itau-apikey': clientId,
+      'x-itau-correlationID': crypto.randomUUID(),
+      ...(opts.headers || {}),
+    },
+  });
 }
 
 // Cria (ou atualiza, se o txid ja existir e ainda nao tiver sido paga) uma

@@ -1,7 +1,7 @@
 // Autoatendimento: escritorio de contabilidade se cadastra e paga via PIX
 // direto na nossa pagina (sem redirecionar pra fora do site). Gera a 1a
 // cobranca PIX no Itau e devolve o codigo "copia e cola" na propria
-// resposta. A LICENCA so nasce quando o webhook (itau-webhook/[token].js)
+// resposta. A LICENCA so nasce quando o webhook (itau-webhook/[token]/pix.js)
 // confirmar o pagamento — aqui so guardamos os dados do cadastro em
 // "pending", ligados ao txid da cobranca.
 import QRCode from 'qrcode';

@@ -7,7 +7,7 @@ export const PLANOS = {
 };
 
 // Politica de cobranca/renovacao PIX — definida SO aqui (billing-run.js e
-// itau-webhook/[token].js importam daqui, em vez de cada um ter sua propria
+// itau-webhook/[token]/pix.js importam daqui, em vez de cada um ter sua propria
 // constante que pode divergir da outra silenciosamente).
 export const BILLING_POLICY = {
   // Cobranca de renovacao e gerada com essa antecedencia do vencimento.

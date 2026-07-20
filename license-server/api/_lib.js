@@ -110,7 +110,7 @@ export async function getRecord(k) {
 // Gera uma chave de licenca garantindo que nao colide com uma ja existente
 // (colisao e ~impossivel com genKey() sozinho — 32^16 chaves — mas e barato
 // conferir). Usado por toda criacao de licenca (manual no admin.js, ou via
-// pagamento confirmado no itau-webhook/[token].js) pra ter a mesma garantia.
+// pagamento confirmado no itau-webhook/[token]/pix.js) pra ter a mesma garantia.
 export async function genUniqueKey() {
   let key = genKey();
   for (let tentativas = 0; tentativas < 3 && (await getRecord(key)); tentativas += 1) {
@@ -269,7 +269,7 @@ export async function limparEventoProcessado(eventId) {
 
 // Monta o registro de uma licenca nova com os valores padrao — usado tanto
 // pela criacao manual (admin.js) quanto pela criacao via 1o pagamento PIX
-// confirmado (itau-webhook.js), pra nao ter duas formas de montar o mesmo
+// confirmado (itau-webhook/[token]/pix.js), pra nao ter duas formas de montar o mesmo
 // formato e correrem o risco de divergir.
 export function buildLicenseRecord({
   clientName = '',
@@ -304,7 +304,7 @@ export function buildLicenseRecord({
 
 // Comparacao de tempo constante (evita leak de timing em comparacao de
 // segredos: tokens de admin, de webhook, etc.) — compartilhada entre
-// admin.js, itau-webhook/[token].js e billing-run.js.
+// admin.js, itau-webhook/[token]/pix.js e billing-run.js.
 export function safeEqual(a, b) {
   const left = Buffer.from(String(a || ''));
   const right = Buffer.from(String(b || ''));

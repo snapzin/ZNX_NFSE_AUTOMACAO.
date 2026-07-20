@@ -5,18 +5,25 @@
 //   - txid ja ligado a uma licenca (cobranca de renovacao)           -> renova
 //
 // O padrao PIX do Bacen nao define assinatura de payload (tipo Stripe/Asaas),
-// entao a autenticidade e garantida por um token secreto na propria URL:
-// configure no Itau Developers a URL de webhook como
+// entao a autenticidade e garantida por um token secreto na propria URL.
+//
+// ATENCAO ao path deste arquivo: a Itau documenta (spec OpenAPI, PUT /webhook/
+// {chave}) que ela acrescenta o sufixo "/pix" na URL cadastrada. Ou seja, se
+// voce registra o webhook no Itau Developers como
 //   https://SEU-PROJETO.vercel.app/api/itau-webhook/<ITAU_WEBHOOK_TOKEN>
+// a notificacao de verdade chega em
+//   https://SEU-PROJETO.vercel.app/api/itau-webhook/<ITAU_WEBHOOK_TOKEN>/pix
+// por isso o handler mora em itau-webhook/[token]/pix.js, nao em
+// itau-webhook/[token].js.
 import {
   getRecord, saveRecord, genUniqueKey, formatKey, setSecurityHeaders, safeEqual,
   buildLicenseRecord, getLicenseKeyByTxid, linkTxidToKey,
   getPendingCharge, deletePendingCharge,
   eventoItauJaProcessado, limparEventoProcessado,
   rateLimit, clientIp,
-} from '../_lib.js';
-import { enviarChaveLicenca } from '../_mail.js';
-import { BILLING_POLICY } from '../planos.js';
+} from '../../_lib.js';
+import { enviarChaveLicenca } from '../../_mail.js';
+import { BILLING_POLICY } from '../../planos.js';
 
 function autorizado(req) {
   const esperado = String(process.env.ITAU_WEBHOOK_TOKEN || '').trim();
