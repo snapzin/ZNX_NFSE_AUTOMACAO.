@@ -54,7 +54,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: electron/package-lock.json
 
@@ -87,12 +87,3 @@ jobs:
           npx electron-builder --win nsis --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: NFSe-Automacao-${{ env.APP_VERSION }}
-          path: |
-            electron/dist/*.exe
-            electron/dist/latest.yml
-            electron/dist/*.blockmap
