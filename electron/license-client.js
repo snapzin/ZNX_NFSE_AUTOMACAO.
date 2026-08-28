@@ -2,10 +2,12 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { net } = require('electron');
 
 const DEFAULT_LICENSE_SERVER_URL = 'https://license-server-sigma-topaz.vercel.app';
 const DEFAULT_CLIENT_SECRET = 'nfse-v1-a7f3c9b2d4e6f8a1b3c5d7e9f0a2b4c6';
 const TIMEOUT_MS = 8000;
+const MAX_ATTEMPTS = 2;
 
 function cleanBaseUrl(url) {
   return String(url || DEFAULT_LICENSE_SERVER_URL).trim().replace(/\/+$/, '');
@@ -29,6 +31,17 @@ function normalizeKey(key) {
 function keyHint(key) {
   const clean = normalizeKey(key);
   return clean.length > 12 ? `${clean.slice(0, 8)}...${clean.slice(-4)}` : clean || null;
+}
+
+function connectionErrorMessage(error) {
+  if (error?.name === 'AbortError') {
+    return 'Tempo esgotado ao consultar o servidor de licencas.';
+  }
+
+  const detail = String(error?.cause?.message || error?.message || '').trim();
+  return detail
+    ? `Sem conexao com o servidor de licencas (${detail}).`
+    : 'Sem conexao com o servidor de licencas.';
 }
 
 function pythonPlatformMachine() {
@@ -88,55 +101,65 @@ function createLicenseClient(app) {
       return { licensed: false, message: 'Nenhuma licenca ativada.', key_hint: null };
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    let lastError = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    try {
-      const response = await fetch(settings.validationUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-client-secret': settings.clientSecret,
-        },
-        body: JSON.stringify({ key: clean, machine_id: getMachineId() }),
-        signal: controller.signal,
-      });
-
-      let data = {};
       try {
-        data = await response.json();
-      } catch {
-        data = {};
-      }
+        // electron.net usa a mesma pilha de rede do Chromium e respeita proxy,
+        // DNS e certificados configurados no Windows. O fetch global do Node
+        // falha em algumas redes corporativas mesmo quando o site abre normal.
+        const response = await net.fetch(settings.validationUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-client-secret': settings.clientSecret,
+          },
+          body: JSON.stringify({ key: clean, machine_id: getMachineId() }),
+          signal: controller.signal,
+          bypassCustomProtocolHandlers: true,
+        });
 
-      if (!response.ok) {
+        let data = {};
+        try {
+          data = await response.json();
+        } catch {
+          data = {};
+        }
+
+        if (!response.ok) {
+          return {
+            licensed: false,
+            message: data.message || `Servidor de licencas respondeu HTTP ${response.status}.`,
+            key_hint: keyHint(clean),
+            server_url: settings.serverUrl,
+          };
+        }
+
         return {
-          licensed: false,
-          message: data.message || `Servidor de licencas respondeu HTTP ${response.status}.`,
+          licensed: Boolean(data.valid),
+          message: String(data.message || ''),
           key_hint: keyHint(clean),
           server_url: settings.serverUrl,
         };
+      } catch (error) {
+        lastError = error;
+      } finally {
+        clearTimeout(timer);
       }
 
-      return {
-        licensed: Boolean(data.valid),
-        message: String(data.message || ''),
-        key_hint: keyHint(clean),
-        server_url: settings.serverUrl,
-      };
-    } catch (error) {
-      const timedOut = error?.name === 'AbortError';
-      return {
-        licensed: false,
-        message: timedOut
-          ? 'Tempo esgotado ao consultar o servidor de licencas.'
-          : 'Sem conexao com o servidor de licencas.',
-        key_hint: keyHint(clean),
-        server_url: settings.serverUrl,
-      };
-    } finally {
-      clearTimeout(timer);
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
     }
+
+    return {
+      licensed: false,
+      message: connectionErrorMessage(lastError),
+      key_hint: keyHint(clean),
+      server_url: settings.serverUrl,
+    };
   }
 
   async function status() {
