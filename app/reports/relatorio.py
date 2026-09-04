@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -104,6 +105,41 @@ def _bloco(root, *nomes: str):
     return None
 
 
+def normalizar_iss_retido(valor: object) -> str:
+    """Normaliza o indicador ``tpRetISSQN`` do XML nacional para Sim/Não.
+
+    No leiaute nacional o campo nao e booleano: 1 = nao retido, 2 = retido
+    pelo tomador e 3 = retido pelo intermediario. Tambem aceitamos as formas
+    textuais/booleanas encontradas em XMLs convertidos por outros provedores.
+    Valor ausente ou desconhecido e tratado como nao retido, mantendo a coluna
+    do relatorio sempre binaria.
+    """
+    if isinstance(valor, bool):
+        return "Sim" if valor else "Não"
+    if valor is None:
+        return "Não"
+
+    texto = str(valor).strip()
+    if not texto:
+        return "Não"
+    texto = "".join(
+        ch for ch in unicodedata.normalize("NFKD", texto.lower())
+        if not unicodedata.combining(ch)
+    )
+    texto = re.sub(r"[\s_-]+", " ", texto).strip()
+
+    # Dominio oficial de tpRetISSQN.
+    if texto in {"1", "nao", "n", "false", "0", "nao retido", "sem retencao"}:
+        return "Não"
+    if texto in {
+        "2", "3", "sim", "s", "true", "retido", "com retencao",
+        "retido pelo tomador", "retido pelo intermediario",
+    }:
+        return "Sim"
+    log.warning("Valor desconhecido para tpRetISSQN: %r; considerando nao retido.", valor)
+    return "Não"
+
+
 _INVALIDO = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
@@ -143,7 +179,7 @@ def extrair_nota(xml_path: Path, situacao: str = "") -> dict | None:
         "vBC": _num(root, "vBC"),
         "pAliqAplic": _num(root, "pAliqAplic"),
         "vISSQN": _num(root, "vISSQN"),
-        "issRetido": "Sim" if tp_ret_iss == "1" else ("Nao" if tp_ret_iss else ""),
+        "issRetido": normalizar_iss_retido(tp_ret_iss),
         "vPis": _num(root, "vPis"),
         "vCofins": _num(root, "vCofins"),
         "vRetIRRF": _num(root, "vRetIRRF"),

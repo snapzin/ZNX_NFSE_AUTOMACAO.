@@ -119,6 +119,12 @@ class NFSeRunner:
         _check_cancel(self.cancel_event, f"[{cliente.cnpj}] Execucao cancelada antes do download.")
         output_dir = self.base_output / _sanitizar_nome_pasta(cliente.nome)
         output_dir.mkdir(parents=True, exist_ok=True)
+        from app.automation.portal_auth import credenciais_para, validar_login_portal
+        credenciais = credenciais_para(config, cliente.cnpj)
+        if credenciais.tipo_login == "usuario_senha":
+            log.info("[%s] Validando acesso ao portal por usuario/senha.", cliente.cnpj)
+            validar_login_portal(config, cliente.cnpj)
+            log.info("[%s] Login por usuario/senha confirmado.", cliente.cnpj)
         return _baixar_cliente_adn(cert, cliente, params, output_dir, self.cancel_event)
 
 def _normalizar_cnpj(value: str) -> str:

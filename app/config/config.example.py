@@ -30,6 +30,16 @@ PLAYWRIGHT_EXTENSION_TIMEOUT_S = 30
 # SELETORES DA TELA NFSE (obtenha via DevTools F12 no portal)
 NFSE_SELECTOR_LOGIN_OK            = ""
 NFSE_SELECTOR_BOTAO_CERTIFICADO   = "a:has(img[alt*='Certificado'])"
+# Credenciais ficam somente neste config.py local (ignorado pelo Git).
+# Alternativa: variaveis NFSE_TIPO_LOGIN, NFSE_USUARIO e NFSE_SENHA.
+NFSE_CREDENCIAIS = {
+    # "12345678000100": {
+    #     "tipo_login": "usuario_senha",
+    #     "usuario_nfse": "12345678000100",
+    #     "senha_nfse": "preencha-localmente",
+    # },
+    # "98765432000100": {"tipo_login": "certificado"},
+}
 NFSE_SELECTOR_DATA_INICIO         = ""
 NFSE_SELECTOR_DATA_FIM            = ""
 NFSE_SELECTOR_BOTAO_FILTRAR       = ""

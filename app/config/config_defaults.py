@@ -67,6 +67,10 @@ def default_values() -> dict[str, object]:
         # Seletores com fallback conhecido. Os demais ficam opcionais.
         "NFSE_SELECTOR_LOGIN_OK": "",
         "NFSE_SELECTOR_BOTAO_CERTIFICADO": "a:has(img[alt*='Certificado'])",
+        # Credenciais por CPF/CNPJ. Permanecem apenas no config.py local
+        # (ignorado pelo Git). Tambem podem vir de NFSE_TIPO_LOGIN,
+        # NFSE_USUARIO e NFSE_SENHA no ambiente.
+        "NFSE_CREDENCIAIS": {},
         "NFSE_SELECTOR_DATA_INICIO": "",
         "NFSE_SELECTOR_DATA_FIM": "",
         "NFSE_SELECTOR_BOTAO_FILTRAR": "",
@@ -172,6 +176,7 @@ def default_config_text() -> str:
         "# SELETORES DA TELA NFSE",
         f"NFSE_SELECTOR_LOGIN_OK = {_literal(values['NFSE_SELECTOR_LOGIN_OK'])}",
         f"NFSE_SELECTOR_BOTAO_CERTIFICADO = {_literal(values['NFSE_SELECTOR_BOTAO_CERTIFICADO'])}",
+        f"NFSE_CREDENCIAIS = {_literal(values['NFSE_CREDENCIAIS'])}",
         f"NFSE_SELECTOR_DATA_INICIO = {_literal(values['NFSE_SELECTOR_DATA_INICIO'])}",
         f"NFSE_SELECTOR_DATA_FIM = {_literal(values['NFSE_SELECTOR_DATA_FIM'])}",
         f"NFSE_SELECTOR_BOTAO_FILTRAR = {_literal(values['NFSE_SELECTOR_BOTAO_FILTRAR'])}",
