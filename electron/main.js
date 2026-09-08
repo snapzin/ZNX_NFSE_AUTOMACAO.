@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
 const { spawn, exec } = require('child_process');
 const { randomBytes } = require('crypto');
+const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const { createLicenseClient, getLicenseSettings } = require('./license-client');
@@ -16,9 +17,26 @@ const API_TOKEN = randomBytes(32).toString('hex');
 let mainWindow;
 let pythonProcess;
 let licenseClient;
+let backendRestartPromise = null;
 
-const API_PORT = 17432;
-const API_URL = `http://127.0.0.1:${API_PORT}`;
+// A porta e escolhida pelo Windows a cada inicializacao. Isso evita conectar
+// acidentalmente a um backend residual, que possui outro API_TOKEN.
+let API_PORT = null;
+let API_URL = null;
+
+const selectAvailableApiPort = () => new Promise((resolve, reject) => {
+  const server = net.createServer();
+  server.unref();
+  server.once('error', reject);
+  server.listen(0, '127.0.0.1', () => {
+    const selectedPort = server.address().port;
+    server.close(() => {
+      API_PORT = selectedPort;
+      API_URL = `http://127.0.0.1:${API_PORT}`;
+      resolve(selectedPort);
+    });
+  });
+});
 
 const isLocalLicenseExemptEndpoint = (endpoint) => {
   if (endpoint === '/health') return true;
@@ -92,6 +110,7 @@ const startPythonBackend = () => {
         PYTHONUTF8: '1',
         PYTHONUNBUFFERED: '1',
         NFSE_API_TOKEN: API_TOKEN,
+        NFSE_API_PORT: String(API_PORT),
         NFSE_LICENSE_SERVER_URL: licenseSettings.serverUrl,
         NFSE_LICENSE_VALIDATE_URL: licenseSettings.validationUrl,
         NFSE_LICENSE_ADMIN_URL: licenseSettings.adminUrl,
@@ -132,9 +151,11 @@ const startPythonBackend = () => {
         return;
       }
       try {
-        const response = await fetch(`${API_URL}/health`);
+        const response = await fetch(`${API_URL}/health/auth`, {
+          headers: { 'x-api-token': API_TOKEN },
+        });
         if (response.ok) {
-          console.log('[Main] Backend respondendo');
+          console.log('[Main] Backend respondendo e autenticado');
           resolve();
           return;
         }
@@ -153,6 +174,35 @@ const startPythonBackend = () => {
 
     checkHealth();
   });
+};
+
+const stopPythonBackend = () => new Promise((resolve) => {
+  const processToStop = pythonProcess;
+  pythonProcess = null;
+  if (!processToStop || processToStop.exitCode !== null) {
+    resolve();
+    return;
+  }
+  if (process.platform === 'win32') {
+    exec(`taskkill /PID ${processToStop.pid} /T /F`, () => resolve());
+    return;
+  }
+  try { processToStop.kill('SIGTERM'); } catch (_) {}
+  setTimeout(resolve, 300);
+});
+
+const restartPythonBackend = async () => {
+  if (backendRestartPromise) return backendRestartPromise;
+  backendRestartPromise = (async () => {
+    console.warn('[Main] Reiniciando backend local para renovar a autenticacao...');
+    await stopPythonBackend();
+    await startPythonBackend();
+  })();
+  try {
+    await backendRestartPromise;
+  } finally {
+    backendRestartPromise = null;
+  }
 };
 
 // ============================================================================
@@ -249,17 +299,23 @@ ipcMain.handle('api-call', async (event, method, endpoint, body) => {
       headers['x-license-key'] = key;
     }
 
-    const options = {
+    const requestBody = body && (typeof body !== 'object' || Object.keys(body).length > 0)
+      ? JSON.stringify(body)
+      : undefined;
+    const callBackend = () => fetch(`${API_URL}${endpoint}`, {
       method,
       headers,
       signal: AbortSignal.timeout(30000),
-    };
+      body: requestBody,
+    });
 
-    if (body && (typeof body !== 'object' || Object.keys(body).length > 0)) {
-      options.body = JSON.stringify(body);
+    let response = await callBackend();
+    if (response.status === 401) {
+      // Token diferente significa backend residual ou reiniciado fora deste
+      // Electron. Recupera automaticamente e repete a operacao uma unica vez.
+      await restartPythonBackend();
+      response = await callBackend();
     }
-
-    const response = await fetch(`${API_URL}${endpoint}`, options);
 
     if (!response.ok) {
       const error = await response.text();
@@ -328,6 +384,7 @@ app.on('ready', async () => {
     // Inicia backend (nao crasha o app se falhar — apenas loga)
     console.log('[Main] Iniciando backend Python...');
     try {
+      await selectAvailableApiPort();
       await startPythonBackend();
     } catch (error) {
       console.warn('[Main] Backend nao respondeu (continuando sem ele):', error.message);

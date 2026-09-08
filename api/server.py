@@ -204,7 +204,7 @@ app.add_middleware(
 _API_TOKEN = os.environ.get("NFSE_API_TOKEN", "")
 
 def _is_license_exempt_path(method: str, path: str) -> bool:
-    if path == "/health":
+    if path in ("/health", "/health/auth"):
         return True
     if method == "GET" and re.fullmatch(r"/executar/[^/]+/status", path):
         return True
@@ -239,6 +239,12 @@ async def _require_token(request: Request, call_next):
 async def health():
     """Health check — Electron aguarda isso para saber que o backend está pronto."""
     return {"ok": True}
+
+
+@app.get("/health/auth")
+async def authenticated_health():
+    """Confirma que Electron e backend compartilham o mesmo token de sessao."""
+    return {"ok": True, "authenticated": True}
 
 @app.get("/config")
 async def get_config():
@@ -1033,6 +1039,34 @@ async def license_deactivate_endpoint():
     return {"ok": True}
 
 
+def _filtrar_clientes_por_login(todos_clientes: list[dict], tipo_login: str) -> list[dict]:
+    """Seleciona clientes ativos conforme a escolha feita na tela Executar."""
+    tipo_login = str(tipo_login or "").strip().lower()
+    if tipo_login not in ("certificado", "usuario_senha", "ambos"):
+        raise HTTPException(
+            status_code=400,
+            detail="Escolha o tipo de cliente: certificado, usuario e senha ou ambos.",
+        )
+    clientes_exec = [c for c in todos_clientes if c.get("ativo", True)]
+    if todos_clientes and not clientes_exec:
+        raise HTTPException(
+            status_code=400,
+            detail="Nenhum cliente selecionado. Marque ao menos um cliente na aba Clientes.",
+        )
+    if tipo_login != "ambos":
+        clientes_exec = [
+            c for c in clientes_exec
+            if str(c.get("tipo_login", "certificado")) == tipo_login
+        ]
+    if (todos_clientes or tipo_login == "usuario_senha") and not clientes_exec:
+        descricao = "com certificado digital" if tipo_login == "certificado" else "com usuario e senha"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Nenhum cliente ativo {descricao} foi encontrado na aba Clientes.",
+        )
+    return clientes_exec
+
+
 @app.post("/executar")
 async def start_execution(request: Request, body: dict):
     """Inicia execução assíncrona. Retorna { jobId }."""
@@ -1043,6 +1077,7 @@ async def start_execution(request: Request, body: dict):
         data_fim = body.get("dataFim")
         cnpjs = body.get("cnpjs")
         tipos = body.get("tipos")  # "emitidas" | "recebidas" | "ambas"
+        tipo_login = str(body.get("tipoLogin", "") or "").strip().lower()
 
         # Clientes da aba Clientes (servidor por maquina / XLSX local). Quando
         # ha clientes cadastrados, a execucao processa SO eles — em vez de
@@ -1050,14 +1085,7 @@ async def start_execution(request: Request, body: dict):
         # (checkbox na tela) entram; se nenhum estiver ativo, cai no
         # comportamento antigo (todos os certificados).
         todos_clientes = _clientes_atuais(request.headers.get("x-license-key", ""))
-        clientes_exec = [c for c in todos_clientes if c.get("ativo", True)]
-        # Se HA clientes cadastrados mas NENHUM ativo, nao roda (evita cair no
-        # fallback de varrer TODOS os certificados sem querer).
-        if todos_clientes and not clientes_exec:
-            raise HTTPException(
-                status_code=400,
-                detail="Nenhum cliente selecionado. Marque ao menos um cliente na aba Clientes.",
-            )
+        clientes_exec = _filtrar_clientes_por_login(todos_clientes, tipo_login)
 
         job_id = str(uuid.uuid4())[:8]
         job = Job(id=job_id, status="running")
@@ -1135,4 +1163,10 @@ async def cancel_job(job_id: str):
 # Entry point
 # =============================================================================
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=17432, log_level="info")
+    try:
+        api_port = int(os.environ.get("NFSE_API_PORT", "17432"))
+    except ValueError:
+        api_port = 17432
+    if not 1 <= api_port <= 65535:
+        api_port = 17432
+    uvicorn.run(app, host="127.0.0.1", port=api_port, log_level="info")

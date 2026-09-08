@@ -6,10 +6,28 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from api import server
+from fastapi import HTTPException
 from app.automation.nfse_automacao import preparar_parametros
 
 
 class TestClientesCredenciais(unittest.TestCase):
+    def test_filtro_de_execucao_por_tipo_de_login(self):
+        clientes = [
+            {"documento": "1", "tipo_login": "certificado", "ativo": True},
+            {"documento": "2", "tipo_login": "usuario_senha", "ativo": True},
+            {"documento": "3", "tipo_login": "usuario_senha", "ativo": False},
+        ]
+        certificados = server._filtrar_clientes_por_login(clientes, "certificado")
+        usuarios = server._filtrar_clientes_por_login(clientes, "usuario_senha")
+        ambos = server._filtrar_clientes_por_login(clientes, "ambos")
+        self.assertEqual([c["documento"] for c in certificados], ["1"])
+        self.assertEqual([c["documento"] for c in usuarios], ["2"])
+        self.assertEqual([c["documento"] for c in ambos], ["1", "2"])
+
+    def test_tipo_de_execucao_e_obrigatorio(self):
+        with self.assertRaises(HTTPException):
+            server._filtrar_clientes_por_login([], "")
+
     def test_normalizacao_preserva_tipo_usuario_e_senha(self):
         cliente = server._normalizar_clientes([{
             "documento": "12.345.678/0001-00",

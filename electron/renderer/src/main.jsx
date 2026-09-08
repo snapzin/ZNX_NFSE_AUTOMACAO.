@@ -722,6 +722,7 @@ function parseProgress(logs, finalizado = false) {
 function ExecutarPage({ api, toast, setStatus, onLogsUpdate, onJobStatusUpdate, license, onLicenseRefresh, onActivate, jobId, setJobId, busy, setBusy }) {
   const [usePrevMonth, setUsePrevMonth] = useState(true);
   const [tipoNota, setTipoNota] = useState('ambas'); // 'emitidas' | 'recebidas' | 'ambas'
+  const [tipoAcesso, setTipoAcesso] = useState(''); // escolha obrigatoria a cada abertura
   const [jobStatus, setJobStatus] = useState(busy ? 'Executando' : 'Pronto');
   const [logs, setLogs] = useState([]);
   const [cancelling, setCancelling] = useState(false);
@@ -788,6 +789,10 @@ function ExecutarPage({ api, toast, setStatus, onLogsUpdate, onJobStatusUpdate, 
   };
 
   const execute = async () => {
+    if (!tipoAcesso) {
+      toast('Escolha quais clientes deseja executar: certificado, usuário e senha ou ambos.', 'warning');
+      return;
+    }
     if (!usePrevMonth) {
       if (!dataInicio || !dataFim) {
         toast('Informe data inicial e final.', 'warning');
@@ -816,13 +821,14 @@ function ExecutarPage({ api, toast, setStatus, onLogsUpdate, onJobStatusUpdate, 
         dataFim: usePrevMonth ? null : isoToBr(dataFim),
         cnpjs: null,
         tipos: tipoNota,
+        tipoLogin: tipoAcesso,
       });
       setJobId(result.jobId);
       toast('Execucao iniciada.', 'info');
     } catch (error) {
       setBusy(false);
       setStatus('Erro ao iniciar');
-      toast('Erro ao iniciar execucao.', 'error');
+      toast(`Erro ao iniciar execução: ${error?.message || error}`, 'error');
     }
   };
 
@@ -889,6 +895,28 @@ function ExecutarPage({ api, toast, setStatus, onLogsUpdate, onJobStatusUpdate, 
 
       <div className="form-box">
         <h3>Parametros de execucao</h3>
+
+        <div className="tipo-row">
+          <span className="tipo-label">Quais clientes executar?</span>
+          <div className="tipo-options">
+            {[
+              ['certificado', 'Somente certificado digital'],
+              ['usuario_senha', 'Somente usuário e senha'],
+              ['ambos', 'Ambos'],
+            ].map(([val, label]) => (
+              <button
+                key={val}
+                type="button"
+                className={tipoAcesso === val ? 'btn-primary' : 'btn-secondary'}
+                onClick={() => setTipoAcesso(val)}
+                disabled={busy}
+                style={{ padding: '6px 16px' }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="tipo-row">
           <span className="tipo-label">Tipo de nota</span>
