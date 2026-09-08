@@ -580,8 +580,17 @@ def _normalizar_clientes(clientes) -> list[dict]:
         ativo = c.get("ativo", True)
         if isinstance(ativo, str):
             ativo = ativo.strip().lower() not in ("nao", "não", "false", "0", "n", "")
+        tipo_login = str(c.get("tipo_login", "certificado") or "certificado").strip().lower()
+        if tipo_login not in ("certificado", "usuario_senha"):
+            tipo_login = "certificado"
+        usuario_nfse = str(c.get("usuario_nfse", "") or "").strip()[:64]
+        senha_nfse = str(c.get("senha_nfse", "") or "")[:512]
         if doc or nome:
-            out.append({"documento": doc, "nome": nome, "ativo": bool(ativo)})
+            out.append({
+                "documento": doc, "nome": nome, "ativo": bool(ativo),
+                "tipo_login": tipo_login, "usuario_nfse": usuario_nfse,
+                "senha_nfse": senha_nfse,
+            })
     return out
 
 
@@ -607,6 +616,9 @@ def _ler_clientes_local() -> dict:
                      if "nome" in h or "razao" in h or "cliente" in h), 1)
     idx_ativo = next((i for i, h in enumerate(header)
                       if "ativo" in h or "selec" in h), None)
+    idx_tipo = next((i for i, h in enumerate(header) if "tipo_login" in h or "tipo login" in h), None)
+    idx_usuario = next((i for i, h in enumerate(header) if "usuario_nfse" in h or "usuario nfse" in h), None)
+    idx_senha = next((i for i, h in enumerate(header) if "senha_nfse" in h or "senha nfse" in h), None)
 
     clientes = []
     for row in rows[1:]:
@@ -618,7 +630,12 @@ def _ler_clientes_local() -> dict:
         if idx_ativo is not None and idx_ativo < len(row):
             ativo = str(row[idx_ativo] or "").strip().lower() not in ("nao", "não", "false", "0", "n", "")
         if doc or nome:
-            clientes.append({"documento": doc, "nome": nome, "ativo": ativo})
+            clientes.append({
+                "documento": doc, "nome": nome, "ativo": ativo,
+                "tipo_login": str(row[idx_tipo] or "certificado") if idx_tipo is not None and idx_tipo < len(row) else "certificado",
+                "usuario_nfse": str(row[idx_usuario] or "") if idx_usuario is not None and idx_usuario < len(row) else "",
+                "senha_nfse": str(row[idx_senha] or "") if idx_senha is not None and idx_senha < len(row) else "",
+            })
 
     return {"clientes": _normalizar_clientes(clientes), "path": str(xlsx_path), "source": "local"}
 
@@ -632,10 +649,14 @@ def _salvar_clientes_local(clientes: list[dict]) -> dict:
     wb = Workbook()
     ws = wb.active
     ws.title = "Clientes"
-    ws.append(["CNPJ", "NOME", "ATIVO"])
+    ws.append(["CNPJ", "NOME", "ATIVO", "TIPO_LOGIN", "USUARIO_NFSE", "SENHA_NFSE"])
     for c in clientes:
         ativo = "Sim" if c.get("ativo", True) else "Nao"
-        ws.append([c.get("documento", ""), c.get("nome", ""), ativo])
+        ws.append([
+            c.get("documento", ""), c.get("nome", ""), ativo,
+            c.get("tipo_login", "certificado"), c.get("usuario_nfse", ""),
+            c.get("senha_nfse", ""),
+        ])
     wb.save(xlsx_path)
     wb.close()
 
@@ -687,6 +708,62 @@ def _aplicar_overlay(clientes: list[dict]) -> list[dict]:
         if doc in ov:
             c["ativo"] = ov[doc]
     return clientes
+
+
+# Credenciais do portal sao locais por maquina. Elas nao sao enviadas ao
+# servidor de licencas nem incluidas no repositorio.
+def _credenciais_path() -> Path:
+    return _resolver_xlsx_path().with_name("clientes_credenciais.json")
+
+
+def _ler_credenciais_locais() -> dict:
+    import json
+    p = _credenciais_path()
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Falha ao ler credenciais locais de clientes: %s", e)
+        return {}
+
+
+def _salvar_credenciais_locais(clientes: list[dict]) -> None:
+    import json
+    dados = {}
+    for c in clientes or []:
+        doc = re.sub(r"\D", "", str(c.get("documento", "")))
+        if not doc:
+            continue
+        tipo = str(c.get("tipo_login", "certificado"))
+        dados[doc] = {
+            "tipo_login": tipo if tipo in ("certificado", "usuario_senha") else "certificado",
+            "usuario_nfse": str(c.get("usuario_nfse", "") or ""),
+            "senha_nfse": str(c.get("senha_nfse", "") or ""),
+        }
+    try:
+        _credenciais_path().write_text(
+            json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError as e:
+        logger.warning("Falha ao salvar credenciais locais de clientes: %s", e)
+
+
+def _aplicar_credenciais_locais(clientes: list[dict]) -> list[dict]:
+    dados = _ler_credenciais_locais()
+    for c in clientes:
+        doc = re.sub(r"\D", "", str(c.get("documento", "")))
+        cred = dados.get(doc)
+        if isinstance(cred, dict):
+            c["tipo_login"] = cred.get("tipo_login", "certificado")
+            c["usuario_nfse"] = cred.get("usuario_nfse", "")
+            c["senha_nfse"] = cred.get("senha_nfse", "")
+    return clientes
+
+
+def _aplicar_dados_locais(clientes: list[dict]) -> list[dict]:
+    return _aplicar_credenciais_locais(_aplicar_overlay(clientes))
 
 
 def _clientes_remotos_ativos() -> bool:
@@ -768,11 +845,11 @@ def _clientes_atuais(license_key: str) -> list[dict]:
             data = _clientes_remote_call("get", license_key)
             clientes = _normalizar_clientes(data.get("clientes") or [])
             if clientes:
-                return _aplicar_overlay(clientes)
+                return _aplicar_dados_locais(clientes)
         except Exception as remote_err:
             logger.warning("Falha ao obter clientes do servidor p/ execucao: %s", remote_err)
     try:
-        return _aplicar_overlay(_ler_clientes_local().get("clientes") or [])
+        return _aplicar_dados_locais(_ler_clientes_local().get("clientes") or [])
     except Exception as local_err:
         logger.warning("Falha ao ler clientes locais p/ execucao: %s", local_err)
         return []
@@ -785,7 +862,7 @@ async def listar_clientes(request: Request):
         if _clientes_remotos_ativos():
             try:
                 data = _clientes_remote_call("get", request.headers.get("x-license-key", ""))
-                clientes = _aplicar_overlay(_normalizar_clientes(data.get("clientes") or []))
+                clientes = _aplicar_dados_locais(_normalizar_clientes(data.get("clientes") or []))
                 if clientes or data.get("updatedAt"):
                     return {
                         "clientes": clientes,
@@ -797,7 +874,7 @@ async def listar_clientes(request: Request):
                     }
 
                 local = _ler_clientes_local()
-                local["clientes"] = _aplicar_overlay(local.get("clientes") or [])
+                local["clientes"] = _aplicar_dados_locais(local.get("clientes") or [])
                 if local.get("clientes"):
                     local["location"] = (
                         f"Arquivo local: {local.get('path')} "
@@ -818,7 +895,7 @@ async def listar_clientes(request: Request):
                 logger.warning("Falha ao carregar clientes do servidor: %s", remote_err)
 
         local = _ler_clientes_local()
-        local["clientes"] = _aplicar_overlay(local.get("clientes") or [])
+        local["clientes"] = _aplicar_dados_locais(local.get("clientes") or [])
         if not local.get("location"):
             local["location"] = f"Arquivo local: {local.get('path')}"
         return local
@@ -835,13 +912,17 @@ async def salvar_clientes(request: Request, payload: dict):
         # Guarda a selecao (ativo/inativo) localmente — o servidor descarta esse
         # campo, entao o overlay local e a fonte da verdade da selecao.
         _salvar_overlay(clientes)
+        _salvar_credenciais_locais(clientes)
 
         if _clientes_remotos_ativos():
             try:
                 data = _clientes_remote_call(
                     "save",
                     request.headers.get("x-license-key", ""),
-                    clientes,
+                    [
+                        {k: c[k] for k in ("documento", "nome", "ativo")}
+                        for c in clientes
+                    ],
                 )
                 return {
                     "ok": True,
@@ -885,6 +966,9 @@ def _parse_xlsx_clientes(path: Path) -> list[dict]:
                      if "nome" in h or "razao" in h or "cliente" in h), 1)
     idx_ativo = next((i for i, h in enumerate(header)
                       if "ativo" in h or "selec" in h), None)
+    idx_tipo = next((i for i, h in enumerate(header) if "tipo_login" in h or "tipo login" in h), None)
+    idx_usuario = next((i for i, h in enumerate(header) if "usuario_nfse" in h or "usuario nfse" in h), None)
+    idx_senha = next((i for i, h in enumerate(header) if "senha_nfse" in h or "senha nfse" in h), None)
     clientes = []
     for row in rows[1:]:
         if not row or all(c is None or str(c).strip() == "" for c in row):
@@ -895,7 +979,12 @@ def _parse_xlsx_clientes(path: Path) -> list[dict]:
         if idx_ativo is not None and idx_ativo < len(row):
             ativo = str(row[idx_ativo] or "").strip().lower() not in ("nao", "não", "false", "0", "n", "")
         if doc or nome:
-            clientes.append({"documento": doc, "nome": nome, "ativo": ativo})
+            clientes.append({
+                "documento": doc, "nome": nome, "ativo": ativo,
+                "tipo_login": str(row[idx_tipo] or "certificado") if idx_tipo is not None and idx_tipo < len(row) else "certificado",
+                "usuario_nfse": str(row[idx_usuario] or "") if idx_usuario is not None and idx_usuario < len(row) else "",
+                "senha_nfse": str(row[idx_senha] or "") if idx_senha is not None and idx_senha < len(row) else "",
+            })
     return _normalizar_clientes(clientes)
 
 

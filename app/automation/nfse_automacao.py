@@ -68,6 +68,9 @@ class Parametros:
     # Mapa CNPJ -> nome vindo da aba Clientes (servidor/por maquina). Quando
     # presente, e usado como filtro/origem de nomes NO LUGAR do XLSX local.
     clientes_map: Optional[dict[str, str]] = field(default=None)
+    # Dados completos por documento, incluindo o tipo de login e as
+    # credenciais locais cadastradas na aba Clientes.
+    clientes_dados: Optional[dict[str, dict]] = field(default=None)
 
 
 @dataclass
@@ -94,6 +97,9 @@ class ResultadoCNPJ:
 class Cliente:
     cnpj: str
     nome: str
+    tipo_login: str = "certificado"
+    usuario_nfse: str = ""
+    senha_nfse: str = ""
 
 
 class NFSeRunner:
@@ -120,10 +126,15 @@ class NFSeRunner:
         output_dir = self.base_output / _sanitizar_nome_pasta(cliente.nome)
         output_dir.mkdir(parents=True, exist_ok=True)
         from app.automation.portal_auth import credenciais_para, validar_login_portal
-        credenciais = credenciais_para(config, cliente.cnpj)
+        dados_login = {
+            "tipo_login": cliente.tipo_login,
+            "usuario_nfse": cliente.usuario_nfse,
+            "senha_nfse": cliente.senha_nfse,
+        }
+        credenciais = credenciais_para(config, cliente.cnpj, dados_login)
         if credenciais.tipo_login == "usuario_senha":
             log.info("[%s] Validando acesso ao portal por usuario/senha.", cliente.cnpj)
-            validar_login_portal(config, cliente.cnpj)
+            validar_login_portal(config, cliente.cnpj, dados_login)
             log.info("[%s] Login por usuario/senha confirmado.", cliente.cnpj)
         return _baixar_cliente_adn(cert, cliente, params, output_dir, self.cancel_event)
 
@@ -260,8 +271,10 @@ def preparar_parametros(
 
     # Normaliza a lista da aba Clientes em mapa documento(digitos) -> nome.
     clientes_map: dict[str, str] | None = None
+    clientes_dados: dict[str, dict] | None = None
     if clientes:
         clientes_map = {}
+        clientes_dados = {}
         for c in clientes:
             if not isinstance(c, dict):
                 continue
@@ -270,8 +283,15 @@ def preparar_parametros(
                 continue
             nome = str(c.get("nome", "")).strip()
             clientes_map[doc] = nome or doc
+            clientes_dados[doc] = {
+                "nome": nome or doc,
+                "tipo_login": str(c.get("tipo_login", "certificado") or "certificado"),
+                "usuario_nfse": str(c.get("usuario_nfse", "") or ""),
+                "senha_nfse": str(c.get("senha_nfse", "") or ""),
+            }
         if not clientes_map:
             clientes_map = None
+            clientes_dados = None
 
     tipos_norm = str(tipos or "ambas").lower().strip()
     if tipos_norm not in ("emitidas", "recebidas", "ambas"):
@@ -306,6 +326,7 @@ def preparar_parametros(
         cnpjs=filtrados,
         tipos=tipos_norm,
         clientes_map=clientes_map,
+        clientes_dados=clientes_dados,
     )
     log.info(
         "Parametros: %s -> %s | CNPJs: %s | Tipos: %s | Clientes (aba): %s",
@@ -481,6 +502,7 @@ def executar_local(
         if idx > 1 and intervalo_adn > 0:
             time.sleep(intervalo_adn)
         nome = clientes_xlsx.get(cnpj, cnpj)
+        dados_cliente = (params.clientes_dados or {}).get(cnpj, {})
         log.info(
             "[%d/%d] Cliente XLSX: '%s' (CNPJ %s) — buscando .pfx correspondente...",
             idx, len(alvo_cnpjs), nome, cnpj,
@@ -522,7 +544,17 @@ def executar_local(
             nome = cert.nome_amigavel or cnpj
 
         try:
-            ne, ae, nr, ar, conf = runner.processar_cliente(Cliente(cnpj=cnpj, nome=nome), cert, params)
+            ne, ae, nr, ar, conf = runner.processar_cliente(
+                Cliente(
+                    cnpj=cnpj,
+                    nome=nome,
+                    tipo_login=str(dados_cliente.get("tipo_login", "certificado")),
+                    usuario_nfse=str(dados_cliente.get("usuario_nfse", "")),
+                    senha_nfse=str(dados_cliente.get("senha_nfse", "")),
+                ),
+                cert,
+                params,
+            )
             resultados.append(
                 ResultadoCNPJ(
                     cnpj=cnpj,

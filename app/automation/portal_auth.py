@@ -23,13 +23,19 @@ class CredenciaisNFSe:
     senha_nfse: str = ""
 
 
-def credenciais_para(config: object, documento: str) -> CredenciaisNFSe:
+def credenciais_para(
+    config: object,
+    documento: str,
+    dados_cliente: dict | None = None,
+) -> CredenciaisNFSe:
     """Resolve credenciais por empresa, com variaveis de ambiente como override."""
     doc = re.sub(r"\D", "", documento or "")
     cadastradas = getattr(config, "NFSE_CREDENCIAIS", {}) or {}
     dados = cadastradas.get(doc, {}) if isinstance(cadastradas, dict) else {}
     if not isinstance(dados, dict):
         dados = {}
+    if isinstance(dados_cliente, dict):
+        dados = {**dados, **dados_cliente}
     tipo = os.getenv("NFSE_TIPO_LOGIN", str(dados.get("tipo_login", "certificado")))
     usuario = os.getenv("NFSE_USUARIO", str(dados.get("usuario_nfse", doc)))
     senha = os.getenv("NFSE_SENHA", str(dados.get("senha_nfse", "")))
@@ -117,9 +123,13 @@ def login_usuario_senha(
         raise ErroLoginNFSe("Login nao concluido; o portal permaneceu na tela de acesso.")
 
 
-def validar_login_portal(config: object, documento: str) -> None:
+def validar_login_portal(
+    config: object,
+    documento: str,
+    dados_cliente: dict | None = None,
+) -> None:
     """Abre um contexto temporario e valida o login configurado da empresa."""
-    cred = credenciais_para(config, documento)
+    cred = credenciais_para(config, documento, dados_cliente)
     if cred.tipo_login != "usuario_senha":
         return
     try:

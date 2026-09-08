@@ -43,6 +43,7 @@ config.py.bak.*
 runtime_settings.json
 nfse.log
 clientes.xlsx
+clientes_credenciais.json
 
 # ── Vercel ────────────────────────────────────────────────────────
 .vercel/
