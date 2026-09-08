@@ -123,7 +123,16 @@ class NFSeRunner:
     ) -> tuple[int, str, int, str, dict]:
         """Retorna (emitidas, arq_emitidas, recebidas, arq_recebidas, conferencia)."""
         _check_cancel(self.cancel_event, f"[{cliente.cnpj}] Execucao cancelada antes do download.")
-        output_dir = self.base_output / _sanitizar_nome_pasta(cliente.nome)
+        nome_pasta = _sanitizar_nome_pasta(cliente.nome)
+        doc = _normalizar_cnpj(cliente.cnpj)
+        documentos = list((params.clientes_map or {}).keys())
+        mesma_raiz = (
+            len(doc) == 14
+            and sum(1 for outro in documentos if len(outro) == 14 and outro[:8] == doc[:8]) > 1
+        )
+        if mesma_raiz:
+            nome_pasta = f"{nome_pasta} - {doc}"
+        output_dir = self.base_output / nome_pasta
         output_dir.mkdir(parents=True, exist_ok=True)
         from app.automation.portal_auth import credenciais_para, validar_login_portal
         dados_login = {
@@ -215,17 +224,24 @@ def _baixar_cliente_adn(
 
     competencias = _competencias_no_periodo(params.data_inicio, params.data_fim) or None
     tipos = _tipos_para_adn(getattr(params, "tipos", "ambas"))
+    cliente_doc = _normalizar_cnpj(cliente.cnpj)
+    cert_doc = _normalizar_cnpj(cert.documento)
+    # A API permite que o certificado da matriz consulte uma filial pelo CNPJ
+    # completo. A identidade/classificacao continua sendo sempre a da filial.
+    cnpj_consulta = cliente_doc if cert_doc and cert_doc != cliente_doc else ""
     log.info(
-        "[%s] Baixando via API ADN | competencias=%s | tipos=%s",
-        cliente.cnpj, sorted(competencias) if competencias else "todas", sorted(tipos),
+        "[%s] Baixando via API ADN | competencias=%s | tipos=%s | consulta=%s",
+        cliente_doc, sorted(competencias) if competencias else "todas", sorted(tipos),
+        cnpj_consulta or "caixa do proprio certificado",
     )
 
     res = adn_client.baixar_dfe(
         cert_path=cert.arquivo,
         senha=cert.senha,
-        owner_cnpj=cert.documento or cliente.cnpj,
+        owner_cnpj=cliente_doc,
         destino=output_dir,
         competencias=competencias,
+        cnpj_consulta=cnpj_consulta,
         tipos=tipos,
         cancelar=(lambda: bool(cancel_event and cancel_event.is_set())),
     )
@@ -425,6 +441,30 @@ def _escolher_cert_mais_recente(candidatos: list) -> "CertificadoInfo":
     return max(candidatos, key=_validade_key)
 
 
+def _certificado_da_matriz_para_filial(
+    cnpj_filial: str,
+    certificados: list[CertificadoInfo],
+) -> CertificadoInfo | None:
+    """Localiza o certificado da matriz (ordem 0001) da mesma raiz da filial.
+
+    A comparacao dos clientes nunca usa apenas a raiz: os 14 digitos seguem
+    sendo a chave. A raiz serve exclusivamente para encontrar a credencial
+    mTLS da matriz que pode consultar a filial via ``cnpjConsulta``.
+    """
+    filial = _normalizar_cnpj(cnpj_filial)
+    if len(filial) != 14:
+        return None
+    raiz = filial[:8]
+    candidatos = [
+        cert for cert in certificados
+        if not cert.erro
+        and len(_normalizar_cnpj(cert.documento)) == 14
+        and _normalizar_cnpj(cert.documento)[:8] == raiz
+        and _normalizar_cnpj(cert.documento)[8:12] == "0001"
+    ]
+    return _escolher_cert_mais_recente(candidatos) if candidatos else None
+
+
 def executar_local(
     params: Parametros,
     cancel_event: threading.Event | None = None,
@@ -520,6 +560,14 @@ def executar_local(
                 cnpj, len(candidatos), nomes_dup,
                 cert.arquivo.name, cert.valido_ate,
             )
+        if cert is None:
+            cert = _certificado_da_matriz_para_filial(cnpj, certs)
+            if cert is not None:
+                log.info(
+                    "[%s] Filial identificada pelo CNPJ completo. Usando certificado "
+                    "da matriz %s com cnpjConsulta=%s.",
+                    cnpj, cert.documento, cnpj,
+                )
         if cert is not None:
             log.info(
                 "[%s] Pareado: '%s' -> %s (CN do certificado: %s)",
@@ -607,7 +655,8 @@ def _gerar_relatorios(resultados: list[ResultadoCNPJ]) -> None:
     for r in resultados:
         if r.status != "ok" or r.notas_encontradas == 0:
             continue
-        pasta = base / _sanitizar_nome_pasta(r.nome)
+        pasta_tipo = r.arquivo_emitidas or r.arquivo_recebidas
+        pasta = Path(pasta_tipo).parent if pasta_tipo else base / _sanitizar_nome_pasta(r.nome)
         if not pasta.is_dir():
             continue
         try:
@@ -646,8 +695,14 @@ def _importar_dominio_web(
             log.info("[%s] Sem notas — pula importacao no Dominio Web.", resultado.cnpj)
             continue
 
-        # Pasta nomeada com o nome do cliente (sem subpastas emitidas/recebidas)
-        dir_empresa = base_saida / _sanitizar_nome_pasta(resultado.nome)
+        # Usa a pasta efetivamente retornada pelo download. Isso preserva a
+        # separacao entre matriz e filiais mesmo quando possuem o mesmo nome.
+        pasta_tipo = resultado.arquivo_emitidas or resultado.arquivo_recebidas
+        dir_empresa = (
+            Path(pasta_tipo).parent
+            if pasta_tipo
+            else base_saida / _sanitizar_nome_pasta(resultado.nome)
+        )
         xmls_ativos = [
             p for p in dir_empresa.rglob("*.xml")
             if "cancelad" not in str(p.parent.name).lower()
