@@ -44,6 +44,11 @@ runtime_settings.json
 nfse.log
 clientes.xlsx
 clientes_credenciais.json
+clientes_selecao.json
+clientes_credenciais.json.corrompido-*
+clientes_selecao.json.corrompido-*
+.clientes_credenciais.json.*.tmp
+.clientes_selecao.json.*.tmp
 
 # ── Vercel ────────────────────────────────────────────────────────
 .vercel/

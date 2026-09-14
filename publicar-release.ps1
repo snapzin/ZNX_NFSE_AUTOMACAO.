@@ -5,7 +5,7 @@
 # Uso:  pwsh -File publicar-release.ps1   (ou clicar com botao direito > Executar)
 # Pre-requisito: ter rodado o build (CONSTRUIR_INSTALADOR.bat) gerando electron\dist.
 $ErrorActionPreference = 'Stop'
-$repo = "snapzin/ZNX_NFSE_AUTOMACAO"
+$repo = "conxcontabil-cloud/ZNX_NFSE_AUTOMACAO"
 
 # --- versao ---
 $pkg = Get-Content (Join-Path $PSScriptRoot "electron\package.json") -Raw | ConvertFrom-Json

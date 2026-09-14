@@ -45,6 +45,7 @@ jobs:
       - name: Build Python backend
         shell: pwsh
         run: |
+          python -m unittest discover -s tests -v
           python -m PyInstaller api\server.spec --noconfirm --clean
           Copy-Item -Path config.py -Destination dist\server\config.py -Force
           (Get-Content dist\server\config.py) `
@@ -61,6 +62,12 @@ jobs:
       - name: Install Electron dependencies
         working-directory: electron
         run: npm ci
+
+      - name: Run client tests
+        shell: pwsh
+        run: |
+          npm --prefix electron test
+          npm --prefix license-server test
 
       - name: Set auto version
         shell: pwsh

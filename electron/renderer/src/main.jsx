@@ -2,6 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client';
 import { AnimatePresence, motion } from 'framer-motion';
 import './styles.css';
+import {
+  chaveCliente,
+  normalizarDocumento,
+  temClienteDuplicado,
+} from './clientes-identidade.mjs';
 
 const api = {
   async call(method, endpoint, body) {
@@ -1244,11 +1249,9 @@ function ClientesPage({ api, toast }) {
         return;
       }
       setClientes((cs) => {
-        const existentes = new Set(
-          cs.map((c) => String(c.documento || '').replace(/\D/g, '')).filter(Boolean),
-        );
+        const existentes = new Set(cs.map(chaveCliente));
         const adicionados = novos.filter(
-          (c) => !existentes.has(String(c.documento || '').replace(/\D/g, '')),
+          (c) => !existentes.has(chaveCliente(c)),
         );
         return [...cs, ...adicionados.map((c) => ({ ...c, ativo: c.ativo !== false }))];
       });
@@ -1262,7 +1265,7 @@ function ClientesPage({ api, toast }) {
     const payload = {
       clientes: clientes
           .map((c) => ({
-            documento: String(c.documento || '').replace(/\D/g, ''),
+            documento: normalizarDocumento(c.documento),
             nome: String(c.nome || '').trim(),
             ativo: c.ativo !== false,
             tipo_login: c.tipo_login === 'usuario_senha' ? 'usuario_senha' : 'certificado',
@@ -1279,9 +1282,8 @@ function ClientesPage({ api, toast }) {
       toast('Preencha CPF/CNPJ válido, nome e, para acesso por usuário, também usuário e senha.', 'warning');
       return;
     }
-    const docs = payload.clientes.map((c) => c.documento);
-    if (new Set(docs).size !== docs.length) {
-      toast('Há CPF/CNPJ duplicado. Cada cliente deve ficar em apenas uma das abas.', 'warning');
+    if (temClienteDuplicado(payload.clientes)) {
+      toast('Há CPF/CNPJ repetido nesta aba. O mesmo documento pode aparecer uma vez em cada tipo de acesso.', 'warning');
       return;
     }
     setSaving(true);

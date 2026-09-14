@@ -6,9 +6,9 @@ import {
   getRecord, saveRecord, normalizeKey, maskKey, setCors, setSecurityHeaders,
   rateLimit, clientIp, redis,
 } from './_lib.js';
+import { normalizeClientes, validarClientes } from './clientes-normalizacao.js';
 
 const CONTACT = 'zayonantunes@gmail.com';
-const MAX_CLIENTES = 5000;
 
 function isMachineBlocked(machine) {
   return machine?.status === 'blocked';
@@ -21,20 +21,6 @@ function activeMachineCount(machines) {
 function clientesPath(key, machineId) {
   const keyHash = crypto.createHash('sha256').update(key).digest('hex').slice(0, 24);
   return `clientes:${keyHash}:${machineId}`;
-}
-
-function normalizeClientes(items) {
-  const out = [];
-  for (const item of Array.isArray(items) ? items : []) {
-    if (!item || typeof item !== 'object') continue;
-    const documento = String(item.documento || '').replace(/\D/g, '').slice(0, 32);
-    const nome = String(item.nome || '').trim().slice(0, 200);
-    // Preserva 'ativo' (checkbox de quais clientes rodam). Ausente = true.
-    const ativo = item.ativo === undefined ? true : Boolean(item.ativo);
-    if (documento || nome) out.push({ documento, nome, ativo });
-    if (out.length >= MAX_CLIENTES) break;
-  }
-  return out;
 }
 
 async function ensureLicensedMachine(key, machineId) {
@@ -134,7 +120,11 @@ export default async function handler(req, res) {
       });
     }
 
-    const clientes = normalizeClientes(body.clientes || []);
+    const erroValidacao = validarClientes(body.clientes);
+    if (erroValidacao) {
+      return res.status(400).json({ ok: false, message: erroValidacao });
+    }
+    const clientes = normalizeClientes(body.clientes);
     const updatedAt = new Date().toISOString();
     await r.set(dataKey, JSON.stringify({ clientes, updatedAt }));
     licensed.rec.machines[machineId].clientCount = clientes.length;

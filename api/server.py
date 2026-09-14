@@ -12,6 +12,7 @@ import threading
 import uuid
 from collections import deque
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -574,8 +575,46 @@ def _resolver_xlsx_path() -> Path:
     return config_dir / raw
 
 
+def _normalizar_tipo_login(value) -> str:
+    return "usuario_senha" if str(value or "").strip().lower() == "usuario_senha" else "certificado"
+
+
+def _chave_cliente(documento, tipo_login) -> str:
+    doc = re.sub(r"\D", "", str(documento or ""))
+    return f"{_normalizar_tipo_login(tipo_login)}:{doc}"
+
+
+def _validar_clientes_payload(clientes) -> None:
+    if not isinstance(clientes, list):
+        raise HTTPException(status_code=400, detail="Clientes deve ser uma lista.")
+    if len(clientes) > 5000:
+        raise HTTPException(status_code=400, detail="O limite e de 5000 clientes por maquina.")
+    vistos = set()
+    for indice, cliente in enumerate(clientes, start=1):
+        if not isinstance(cliente, dict):
+            raise HTTPException(status_code=400, detail=f"Cliente {indice} possui formato invalido.")
+        doc = re.sub(r"\D", "", str(cliente.get("documento", "")))
+        nome = str(cliente.get("nome", "")).strip()
+        tipo = _normalizar_tipo_login(cliente.get("tipo_login"))
+        if len(doc) not in (11, 14):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cliente {indice}: CPF/CNPJ deve possuir 11 ou 14 digitos.",
+            )
+        if not nome:
+            raise HTTPException(status_code=400, detail=f"Cliente {indice}: nome e obrigatorio.")
+        chave = _chave_cliente(doc, tipo)
+        if chave in vistos:
+            raise HTTPException(
+                status_code=400,
+                detail="CPF/CNPJ repetido no mesmo tipo de acesso.",
+            )
+        vistos.add(chave)
+
+
 def _normalizar_clientes(clientes) -> list[dict]:
     out = []
+    vistos = set()
     for c in clientes or []:
         if not isinstance(c, dict):
             continue
@@ -586,12 +625,14 @@ def _normalizar_clientes(clientes) -> list[dict]:
         ativo = c.get("ativo", True)
         if isinstance(ativo, str):
             ativo = ativo.strip().lower() not in ("nao", "não", "false", "0", "n", "")
-        tipo_login = str(c.get("tipo_login", "certificado") or "certificado").strip().lower()
-        if tipo_login not in ("certificado", "usuario_senha"):
-            tipo_login = "certificado"
+        tipo_login = _normalizar_tipo_login(c.get("tipo_login", "certificado"))
         usuario_nfse = str(c.get("usuario_nfse", "") or "").strip()[:64]
         senha_nfse = str(c.get("senha_nfse", "") or "")[:512]
         if doc or nome:
+            chave = _chave_cliente(doc, tipo_login)
+            if chave in vistos:
+                continue
+            vistos.add(chave)
             out.append({
                 "documento": doc, "nome": nome, "ativo": bool(ativo),
                 "tipo_login": tipo_login, "usuario_nfse": usuario_nfse,
@@ -670,37 +711,77 @@ def _salvar_clientes_local(clientes: list[dict]) -> dict:
 
 
 # ── Overlay LOCAL da selecao (ativo/inativo) por CNPJ ────────────────────────
-# O servidor de licencas so guarda documento+nome (descarta 'ativo'). Para a
-# selecao por checkbox funcionar mesmo com armazenamento remoto, guardamos o
-# ativo/inativo num arquivo local por CNPJ e aplicamos ao ler/executar.
+# O servidor remoto guarda documento, nome, tipo e ativo. Mantemos uma copia
+# local da selecao por documento+tipo para compatibilidade e operacao offline.
 def _overlay_path() -> Path:
     return _resolver_xlsx_path().with_name("clientes_selecao.json")
 
 
-def _ler_overlay() -> dict:
+def _salvar_json_local_atomico(path: Path, dados) -> None:
     import json
-    p = _overlay_path()
-    if not p.exists():
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporario = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporario.write_text(
+            json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        temporario.replace(path)
+    except OSError:
+        try:
+            temporario.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _ler_json_local_com_backup(path: Path, descricao: str) -> dict:
+    import json
+    if not path.exists():
         return {}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        return {re.sub(r"\D", "", str(k)): bool(v) for k, v in (data or {}).items()}
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Falha ao ler selecao de clientes: %s", e)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("o conteudo JSON deve ser um objeto")
+        return data
+    except (json.JSONDecodeError, TypeError, ValueError) as erro:
+        sufixo = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        backup = path.with_name(f"{path.name}.corrompido-{sufixo}")
+        try:
+            path.replace(backup)
+        except OSError as erro_backup:
+            raise RuntimeError(
+                f"Falha ao preservar {descricao} corrompido: {erro_backup}"
+            ) from erro
+        logger.warning(
+            "%s corrompido foi preservado em %s: %s", descricao, backup, erro
+        )
         return {}
+
+
+def _ler_overlay() -> dict:
+    p = _overlay_path()
+    data = _ler_json_local_com_backup(p, "Arquivo de selecao de clientes")
+    out = {}
+    for key, value in data.items():
+        raw = str(key or "")
+        if ":" in raw:
+            tipo, doc = raw.split(":", 1)
+            chave = _chave_cliente(doc, tipo)
+        else:
+            # Formato antigo: apenas o documento.
+            chave = re.sub(r"\D", "", raw)
+        if chave:
+            out[chave] = bool(value)
+    return out
 
 
 def _salvar_overlay(clientes: list[dict]) -> None:
-    import json
     sel = {}
     for c in clientes or []:
         doc = re.sub(r"\D", "", str(c.get("documento", "")))
         if doc:
-            sel[doc] = bool(c.get("ativo", True))
-    try:
-        _overlay_path().write_text(json.dumps(sel), encoding="utf-8")
-    except OSError as e:
-        logger.warning("Falha ao salvar selecao de clientes: %s", e)
+            sel[_chave_cliente(doc, c.get("tipo_login"))] = bool(c.get("ativo", True))
+    _salvar_json_local_atomico(_overlay_path(), sel)
 
 
 def _aplicar_overlay(clientes: list[dict]) -> list[dict]:
@@ -711,7 +792,11 @@ def _aplicar_overlay(clientes: list[dict]) -> list[dict]:
         return clientes
     for c in clientes:
         doc = re.sub(r"\D", "", str(c.get("documento", "")))
-        if doc in ov:
+        chave = _chave_cliente(doc, c.get("tipo_login"))
+        if chave in ov:
+            c["ativo"] = ov[chave]
+        elif doc in ov:
+            # Compatibilidade com clientes_selecao.json criado por versoes antigas.
             c["ativo"] = ov[doc]
     return clientes
 
@@ -723,53 +808,66 @@ def _credenciais_path() -> Path:
 
 
 def _ler_credenciais_locais() -> dict:
-    import json
     p = _credenciais_path()
-    if not p.exists():
-        return {}
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Falha ao ler credenciais locais de clientes: %s", e)
-        return {}
+    return _ler_json_local_com_backup(p, "Arquivo de credenciais locais")
 
 
 def _salvar_credenciais_locais(clientes: list[dict]) -> None:
-    import json
     dados = {}
     for c in clientes or []:
         doc = re.sub(r"\D", "", str(c.get("documento", "")))
         if not doc:
             continue
-        tipo = str(c.get("tipo_login", "certificado"))
-        dados[doc] = {
-            "tipo_login": tipo if tipo in ("certificado", "usuario_senha") else "certificado",
+        tipo = _normalizar_tipo_login(c.get("tipo_login", "certificado"))
+        dados[_chave_cliente(doc, tipo)] = {
+            "tipo_login": tipo,
             "usuario_nfse": str(c.get("usuario_nfse", "") or ""),
             "senha_nfse": str(c.get("senha_nfse", "") or ""),
         }
-    try:
-        _credenciais_path().write_text(
-            json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    except OSError as e:
-        logger.warning("Falha ao salvar credenciais locais de clientes: %s", e)
+    _salvar_json_local_atomico(_credenciais_path(), dados)
 
 
 def _aplicar_credenciais_locais(clientes: list[dict]) -> list[dict]:
     dados = _ler_credenciais_locais()
+    total_por_doc = {}
     for c in clientes:
         doc = re.sub(r"\D", "", str(c.get("documento", "")))
-        cred = dados.get(doc)
+        total_por_doc[doc] = total_por_doc.get(doc, 0) + 1
+
+    for c in clientes:
+        doc = re.sub(r"\D", "", str(c.get("documento", "")))
+        chave = _chave_cliente(doc, c.get("tipo_login"))
+        cred = dados.get(chave)
+        if not isinstance(cred, dict):
+            # Formato antigo: credenciais indexadas somente pelo documento.
+            legado = dados.get(doc)
+            if isinstance(legado, dict):
+                tipo_atual = _normalizar_tipo_login(c.get("tipo_login"))
+                tipo_legado = _normalizar_tipo_login(legado.get("tipo_login"))
+                if total_por_doc.get(doc) == 1 or tipo_atual == tipo_legado:
+                    cred = legado
+        if not isinstance(cred, dict) and total_por_doc.get(doc) == 1:
+            # Durante a migracao, o servidor antigo pode devolver uma unica linha
+            # sem tipo. Recupera o unico cadastro local compativel com o documento.
+            candidatos = [
+                valor for key, valor in dados.items()
+                if isinstance(valor, dict)
+                and ":" in str(key)
+                and re.sub(r"\D", "", str(key).split(":", 1)[1]) == doc
+            ]
+            if len(candidatos) == 1:
+                cred = candidatos[0]
         if isinstance(cred, dict):
-            c["tipo_login"] = cred.get("tipo_login", "certificado")
+            c["tipo_login"] = _normalizar_tipo_login(cred.get("tipo_login"))
             c["usuario_nfse"] = cred.get("usuario_nfse", "")
             c["senha_nfse"] = cred.get("senha_nfse", "")
     return clientes
 
 
 def _aplicar_dados_locais(clientes: list[dict]) -> list[dict]:
-    return _aplicar_credenciais_locais(_aplicar_overlay(clientes))
+    # Primeiro restaura o tipo de login (inclusive na migracao do servidor
+    # antigo); depois usa esse tipo para aplicar a selecao da aba correta.
+    return _aplicar_overlay(_aplicar_credenciais_locais(clientes))
 
 
 def _clientes_remotos_ativos() -> bool:
@@ -914,9 +1012,11 @@ async def listar_clientes(request: Request):
 async def salvar_clientes(request: Request, payload: dict):
     """Grava clientes por maquina no servidor; local so se NFSE_CLIENTES_REMOTE=0."""
     try:
-        clientes = _normalizar_clientes(payload.get("clientes") or [])
-        # Guarda a selecao (ativo/inativo) localmente — o servidor descarta esse
-        # campo, entao o overlay local e a fonte da verdade da selecao.
+        clientes_brutos = payload.get("clientes")
+        _validar_clientes_payload(clientes_brutos)
+        clientes = _normalizar_clientes(clientes_brutos)
+        # Espelha selecao e credenciais localmente. Usuario e senha nunca sao
+        # enviados ao servidor remoto.
         _salvar_overlay(clientes)
         _salvar_credenciais_locais(clientes)
 
@@ -926,7 +1026,7 @@ async def salvar_clientes(request: Request, payload: dict):
                     "save",
                     request.headers.get("x-license-key", ""),
                     [
-                        {k: c[k] for k in ("documento", "nome", "ativo")}
+                        {k: c[k] for k in ("documento", "nome", "ativo", "tipo_login")}
                         for c in clientes
                     ],
                 )

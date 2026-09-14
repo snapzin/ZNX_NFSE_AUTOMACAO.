@@ -71,6 +71,9 @@ class Parametros:
     # Dados completos por documento, incluindo o tipo de login e as
     # credenciais locais cadastradas na aba Clientes.
     clientes_dados: Optional[dict[str, dict]] = field(default=None)
+    # Lista preservada por (documento, tipo_login). Diferente dos mapas acima,
+    # nao colapsa o mesmo documento cadastrado nas duas abas.
+    clientes_lista: Optional[list[dict]] = field(default=None)
 
 
 @dataclass
@@ -288,9 +291,12 @@ def preparar_parametros(
     # Normaliza a lista da aba Clientes em mapa documento(digitos) -> nome.
     clientes_map: dict[str, str] | None = None
     clientes_dados: dict[str, dict] | None = None
+    clientes_lista: list[dict] | None = None
     if clientes:
         clientes_map = {}
         clientes_dados = {}
+        clientes_lista = []
+        identidades_vistas: set[tuple[str, str]] = set()
         for c in clientes:
             if not isinstance(c, dict):
                 continue
@@ -298,16 +304,32 @@ def preparar_parametros(
             if len(doc) not in (11, 14):
                 continue
             nome = str(c.get("nome", "")).strip()
+            tipo_login = str(c.get("tipo_login", "certificado") or "certificado")
+            if tipo_login not in ("certificado", "usuario_senha"):
+                tipo_login = "certificado"
+            identidade = (doc, tipo_login)
+            if identidade in identidades_vistas:
+                continue
+            identidades_vistas.add(identidade)
+            dados = {
+                "documento": doc,
+                "nome": nome or doc,
+                "tipo_login": tipo_login,
+                "usuario_nfse": str(c.get("usuario_nfse", "") or ""),
+                "senha_nfse": str(c.get("senha_nfse", "") or ""),
+            }
+            clientes_lista.append(dados)
             clientes_map[doc] = nome or doc
             clientes_dados[doc] = {
                 "nome": nome or doc,
-                "tipo_login": str(c.get("tipo_login", "certificado") or "certificado"),
-                "usuario_nfse": str(c.get("usuario_nfse", "") or ""),
-                "senha_nfse": str(c.get("senha_nfse", "") or ""),
+                "tipo_login": tipo_login,
+                "usuario_nfse": dados["usuario_nfse"],
+                "senha_nfse": dados["senha_nfse"],
             }
         if not clientes_map:
             clientes_map = None
             clientes_dados = None
+            clientes_lista = None
 
     tipos_norm = str(tipos or "ambas").lower().strip()
     if tipos_norm not in ("emitidas", "recebidas", "ambas"):
@@ -343,6 +365,7 @@ def preparar_parametros(
         tipos=tipos_norm,
         clientes_map=clientes_map,
         clientes_dados=clientes_dados,
+        clientes_lista=clientes_lista,
     )
     log.info(
         "Parametros: %s -> %s | CNPJs: %s | Tipos: %s | Clientes (aba): %s",
@@ -484,11 +507,31 @@ def executar_local(
 
     todos_cert_cnpjs = set(certs_unicos.keys()) | set(duplicados.keys())
 
+    def dados_alvo(cnpj: str) -> dict:
+        dados = dict((params.clientes_dados or {}).get(cnpj, {}))
+        dados["documento"] = cnpj
+        dados["nome"] = str(dados.get("nome") or clientes_xlsx.get(cnpj, cnpj))
+        return dados
+
     if params.cnpjs:
-        alvo_cnpjs = list(params.cnpjs)
+        alvos_clientes = [dados_alvo(cnpj) for cnpj in params.cnpjs]
+    elif params.clientes_lista:
+        # Preserva duas entradas do mesmo documento quando elas pertencem a
+        # formas de acesso diferentes. A execucao continua sequencial.
+        alvos_clientes = [dict(cliente) for cliente in params.clientes_lista]
     elif clientes_xlsx:
         # XLSX como filtro; inclui tambem CNPJs com cert duplicado (resolvidos adiante)
-        alvo_cnpjs = sorted(clientes_xlsx.keys())
+        alvos_clientes = [dados_alvo(cnpj) for cnpj in sorted(clientes_xlsx.keys())]
+    else:
+        # Sem filtro: processa todos com cert valido (unicos + duplicados resolvidos)
+        alvos_clientes = [dados_alvo(cnpj) for cnpj in sorted(todos_cert_cnpjs)]
+
+    alvo_cnpjs = [
+        _normalizar_cnpj(str(cliente.get("documento", "")))
+        for cliente in alvos_clientes
+    ]
+
+    if clientes_xlsx and not params.cnpjs:
         # Diagnostico: CNPJs do XLSX sem certificado correspondente
         sem_cert = sorted(set(alvo_cnpjs) - todos_cert_cnpjs)
         if sem_cert:
@@ -517,11 +560,7 @@ def executar_local(
                     "Nenhum CNPJ do XLSX corresponde a um certificado na pasta de certs. "
                     "Verifique se PASTA_CERTS em config.py aponta para a pasta correta."
                 )
-    else:
-        # Sem filtro: processa todos com cert valido (unicos + duplicados resolvidos)
-        alvo_cnpjs = sorted(todos_cert_cnpjs)
-
-    if not alvo_cnpjs:
+    if not alvos_clientes:
         raise RuntimeError("Nenhum CNPJ encontrado para processar.")
 
     log.info(
@@ -536,13 +575,13 @@ def executar_local(
     runner = NFSeRunner(cancel_event=cancel_event)
     intervalo_adn = float(getattr(config, "ADN_INTERVALO_CLIENTES_S", 1.5) or 0)
 
-    for idx, cnpj in enumerate(alvo_cnpjs, start=1):
+    for idx, dados_cliente in enumerate(alvos_clientes, start=1):
         _check_cancel(cancel_event, "Execucao cancelada pelo usuario.")
         # Respira entre clientes no modo ADN para nao bater no rate-limit (429).
         if idx > 1 and intervalo_adn > 0:
             time.sleep(intervalo_adn)
-        nome = clientes_xlsx.get(cnpj, cnpj)
-        dados_cliente = (params.clientes_dados or {}).get(cnpj, {})
+        cnpj = _normalizar_cnpj(str(dados_cliente.get("documento", "")))
+        nome = str(dados_cliente.get("nome") or clientes_xlsx.get(cnpj, cnpj))
         log.info(
             "[%d/%d] Cliente XLSX: '%s' (CNPJ %s) — buscando .pfx correspondente...",
             idx, len(alvo_cnpjs), nome, cnpj,

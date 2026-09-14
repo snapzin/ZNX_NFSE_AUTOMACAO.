@@ -50,6 +50,8 @@ const isProd = app.isPackaged;
 const DEV_RENDERER_URL = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 let updateCheckTimer = null;
+let promptedUpdateVersion = null;
+let updateDownloadInProgress = false;
 
 const getProjectRoot = () => process.env.NFSE_PROJECT_ROOT || path.join(__dirname, '..');
 
@@ -242,16 +244,66 @@ const createWindow = () => {
 const setupAutoUpdates = () => {
   if (!autoUpdater || !app.isPackaged) return;
 
-  autoUpdater.autoDownload = true;
+  // Cada push na main gera uma GitHub Release pelo workflow auto-release.yml.
+  // O download so comeca depois da confirmacao do usuario.
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-available', async (info) => {
+    const version = info?.version || 'nova';
+    if (
+      promptedUpdateVersion === version
+      || updateDownloadInProgress
+      || !mainWindow
+      || mainWindow.isDestroyed()
+    ) {
+      return;
+    }
+
+    promptedUpdateVersion = version;
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Nova atualizacao disponivel',
+      message: `A versao ${version} esta disponivel.`,
+      detail: 'Deseja baixar a atualizacao agora? O aplicativo avisara quando estiver pronta para instalar.',
+      buttons: ['Atualizar agora', 'Depois'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    });
+
+    if (result.response !== 0) return;
+
+    updateDownloadInProgress = true;
+    try {
+      await autoUpdater.downloadUpdate();
+    } catch (error) {
+      updateDownloadInProgress = false;
+      console.warn('[AutoUpdate] Falha ao baixar:', error?.message);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        await dialog.showMessageBox(mainWindow, {
+          type: 'error',
+          title: 'Falha na atualizacao',
+          message: 'Nao foi possivel baixar a atualizacao.',
+          detail: 'Verifique a conexao com a internet e tente novamente ao reabrir o aplicativo.',
+          buttons: ['OK'],
+        });
+      }
+    }
+  });
 
   autoUpdater.on('update-downloaded', (info) => {
+    updateDownloadInProgress = false;
     if (mainWindow && !mainWindow.isDestroyed()) {
       dialog.showMessageBox(mainWindow, {
         type: 'info',
-        title: 'Atualizacao disponivel',
-        message: `Nova versao ${info?.version || ''} baixada.`,
-        detail: 'O app vai reiniciar para aplicar a atualizacao.',
-        buttons: ['Reiniciar agora', 'Depois'],
+        title: 'Atualizacao pronta',
+        message: `A versao ${info?.version || ''} foi baixada.`,
+        detail: 'Reinicie agora para concluir a instalacao. Se escolher depois, ela sera aplicada ao fechar o aplicativo.',
+        buttons: ['Reiniciar e instalar', 'Depois'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
       }).then((r) => { if (r.response === 0) autoUpdater.quitAndInstall(); });
     }
   });
