@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import './styles.css';
 import {
   chaveCliente,
+  clientesPorCertificado,
   normalizarDocumento,
   temClienteDuplicado,
 } from './clientes-identidade.mjs';
@@ -727,7 +728,6 @@ function parseProgress(logs, finalizado = false) {
 function ExecutarPage({ api, toast, setStatus, onLogsUpdate, onJobStatusUpdate, license, onLicenseRefresh, onActivate, jobId, setJobId, busy, setBusy }) {
   const [usePrevMonth, setUsePrevMonth] = useState(true);
   const [tipoNota, setTipoNota] = useState('ambas'); // 'emitidas' | 'recebidas' | 'ambas'
-  const [tipoAcesso, setTipoAcesso] = useState(''); // escolha obrigatoria a cada abertura
   const [jobStatus, setJobStatus] = useState(busy ? 'Executando' : 'Pronto');
   const [logs, setLogs] = useState([]);
   const [cancelling, setCancelling] = useState(false);
@@ -794,10 +794,6 @@ function ExecutarPage({ api, toast, setStatus, onLogsUpdate, onJobStatusUpdate, 
   };
 
   const execute = async () => {
-    if (!tipoAcesso) {
-      toast('Escolha quais clientes deseja executar: certificado, usuário e senha ou ambos.', 'warning');
-      return;
-    }
     if (!usePrevMonth) {
       if (!dataInicio || !dataFim) {
         toast('Informe data inicial e final.', 'warning');
@@ -826,7 +822,7 @@ function ExecutarPage({ api, toast, setStatus, onLogsUpdate, onJobStatusUpdate, 
         dataFim: usePrevMonth ? null : isoToBr(dataFim),
         cnpjs: null,
         tipos: tipoNota,
-        tipoLogin: tipoAcesso,
+        tipoLogin: 'certificado',
       });
       setJobId(result.jobId);
       toast('Execucao iniciada.', 'info');
@@ -901,27 +897,7 @@ function ExecutarPage({ api, toast, setStatus, onLogsUpdate, onJobStatusUpdate, 
       <div className="form-box">
         <h3>Parametros de execucao</h3>
 
-        <div className="tipo-row">
-          <span className="tipo-label">Quais clientes executar?</span>
-          <div className="tipo-options">
-            {[
-              ['certificado', 'Somente certificado digital'],
-              ['usuario_senha', 'Somente usuário e senha'],
-              ['ambos', 'Ambos'],
-            ].map(([val, label]) => (
-              <button
-                key={val}
-                type="button"
-                className={tipoAcesso === val ? 'btn-primary' : 'btn-secondary'}
-                onClick={() => setTipoAcesso(val)}
-                disabled={busy}
-                style={{ padding: '6px 16px' }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <p>Acesso por certificado digital.</p>
 
         <div className="tipo-row">
           <span className="tipo-label">Tipo de nota</span>
@@ -1188,18 +1164,12 @@ function ClientesPage({ api, toast }) {
   const [saving, setSaving] = useState(false);
   const [filtro, setFiltro] = useState('');
   const [pathInfo, setPathInfo] = useState('');
-  const [tipoAba, setTipoAba] = useState('certificado');
 
   const carregar = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get('/clientes');
-      setClientes((res?.clientes || []).map((c) => ({
-        ...c,
-        tipo_login: c.tipo_login === 'usuario_senha' ? 'usuario_senha' : 'certificado',
-        usuario_nfse: c.usuario_nfse || '',
-        senha_nfse: c.senha_nfse || '',
-      })));
+      setClientes(clientesPorCertificado(res?.clientes || []));
       setPathInfo(res?.location || res?.path || '');
     } catch (err) {
       toast(`Falha ao carregar clientes: ${err?.message || err}`, 'error');
@@ -1225,8 +1195,7 @@ function ClientesPage({ api, toast }) {
 
   const adicionar = () => {
     setClientes((cs) => [...cs, {
-      documento: '', nome: '', ativo: true, tipo_login: tipoAba,
-      usuario_nfse: '', senha_nfse: '',
+      documento: '', nome: '', ativo: true, tipo_login: 'certificado',
     }]);
   };
 
@@ -1243,7 +1212,7 @@ function ClientesPage({ api, toast }) {
       const path = await window.electronAPI?.selectFile?.();
       if (!path) return;
       const res = await api.post('/clientes/importar', { path });
-      const novos = res?.clientes || [];
+      const novos = clientesPorCertificado(res?.clientes || []);
       if (novos.length === 0) {
         toast('Nenhum cliente encontrado na planilha.', 'warning');
         return;
@@ -1268,22 +1237,19 @@ function ClientesPage({ api, toast }) {
             documento: normalizarDocumento(c.documento),
             nome: String(c.nome || '').trim(),
             ativo: c.ativo !== false,
-            tipo_login: c.tipo_login === 'usuario_senha' ? 'usuario_senha' : 'certificado',
-            usuario_nfse: String(c.usuario_nfse || '').trim(),
-            senha_nfse: String(c.senha_nfse || ''),
+            tipo_login: 'certificado',
           }))
           .filter((c) => c.documento || c.nome),
     };
     const incompleto = payload.clientes.find((c) => (
-      ![11, 14].includes(c.documento.length) || !c.nome ||
-      (c.tipo_login === 'usuario_senha' && (!c.usuario_nfse || !c.senha_nfse))
+      ![11, 14].includes(c.documento.length) || !c.nome
     ));
     if (incompleto) {
-      toast('Preencha CPF/CNPJ válido, nome e, para acesso por usuário, também usuário e senha.', 'warning');
+      toast('Preencha CPF/CNPJ válido e nome do cliente.', 'warning');
       return;
     }
     if (temClienteDuplicado(payload.clientes)) {
-      toast('Há CPF/CNPJ repetido nesta aba. O mesmo documento pode aparecer uma vez em cada tipo de acesso.', 'warning');
+      toast('Há CPF/CNPJ completo repetido na lista de clientes.', 'warning');
       return;
     }
     setSaving(true);
@@ -1300,48 +1266,25 @@ function ClientesPage({ api, toast }) {
   const filtrados = clientes
     .map((c, idx) => ({ ...c, _idx: idx }))
     .filter((c) => {
-      if ((c.tipo_login || 'certificado') !== tipoAba) return false;
       if (!filtro) return true;
       const f = filtro.toLowerCase();
       const doc = String(c.documento || '').replace(/\D/g, '');
-      return doc.includes(f.replace(/\D/g, '')) ||
+      const digitos = f.replace(/\D/g, '');
+      return (digitos.length > 0 && doc.includes(digitos)) ||
              String(c.nome || '').toLowerCase().includes(f);
     });
 
-  const clientesDaAba = clientes.filter((c) => (c.tipo_login || 'certificado') === tipoAba);
+  const clientesDaAba = clientes;
   const totalAtivos = clientesDaAba.filter((c) => c.ativo !== false).length;
   const todosMarcados = clientesDaAba.length > 0 && totalAtivos === clientesDaAba.length;
-  const totalCertificado = clientes.filter((c) => (c.tipo_login || 'certificado') === 'certificado').length;
-  const totalUsuarioSenha = clientes.filter((c) => c.tipo_login === 'usuario_senha').length;
 
   const marcarTodosDaAba = (ativo) => {
-    setClientes((cs) => cs.map((c) => (
-      (c.tipo_login || 'certificado') === tipoAba ? { ...c, ativo } : c
-    )));
+    setClientes((cs) => cs.map((c) => ({ ...c, ativo })));
   };
 
   return (
     <div className="page-inner">
-      <div className="clientes-tabs" role="tablist" aria-label="Tipo de acesso dos clientes">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tipoAba === 'certificado'}
-          className={tipoAba === 'certificado' ? 'active' : ''}
-          onClick={() => setTipoAba('certificado')}
-        >
-          Clientes com certificado <span>{totalCertificado}</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tipoAba === 'usuario_senha'}
-          className={tipoAba === 'usuario_senha' ? 'active' : ''}
-          onClick={() => setTipoAba('usuario_senha')}
-        >
-          Clientes com usuário e senha <span>{totalUsuarioSenha}</span>
-        </button>
-      </div>
+      <p>Clientes com certificado digital</p>
       <div className="clientes-toolbar">
         <input
           type="text"
@@ -1358,7 +1301,7 @@ function ClientesPage({ api, toast }) {
             Importar planilha
           </button>
           <button type="button" className="btn-secondary" onClick={adicionar}>
-            + Adicionar {tipoAba === 'certificado' ? 'com certificado' : 'com usuário e senha'}
+            + Adicionar cliente
           </button>
           <button type="button" className="btn-primary" onClick={salvar} disabled={saving}>
             {saving ? 'Salvando...' : 'Salvar'}
@@ -1385,18 +1328,16 @@ function ClientesPage({ api, toast }) {
               <th style={{ width: '40px' }}>#</th>
               <th style={{ width: '180px' }}>CNPJ / CPF</th>
               <th>Nome do Cliente</th>
-              {tipoAba === 'usuario_senha' && <th style={{ width: '180px' }}>Usuário NFSe</th>}
-              {tipoAba === 'usuario_senha' && <th style={{ width: '180px' }}>Senha NFSe</th>}
               <th style={{ width: '150px' }}>Ações</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={tipoAba === 'usuario_senha' ? 7 : 5} className="clientes-empty">Carregando...</td></tr>
+              <tr><td colSpan={5} className="clientes-empty">Carregando...</td></tr>
             )}
             {!loading && filtrados.length === 0 && (
               <tr>
-                <td colSpan={tipoAba === 'usuario_senha' ? 7 : 5} className="clientes-empty">
+                <td colSpan={5} className="clientes-empty">
                   {clientes.length === 0
                     ? 'Nenhum cliente cadastrado. Clique em "Importar planilha" ou "+ Adicionar".'
                     : 'Nenhum resultado para o filtro.'}
@@ -1431,42 +1372,8 @@ function ClientesPage({ api, toast }) {
                     onChange={(e) => editar(c._idx, 'nome', e.target.value)}
                   />
                 </td>
-                {tipoAba === 'usuario_senha' && (
-                  <td>
-                    <input
-                      type="text"
-                      value={c.usuario_nfse || ''}
-                      placeholder="CPF ou CNPJ de acesso"
-                      autoComplete="off"
-                      onChange={(e) => editar(c._idx, 'usuario_nfse', e.target.value)}
-                    />
-                  </td>
-                )}
-                {tipoAba === 'usuario_senha' && (
-                  <td>
-                    <input
-                      type="password"
-                      value={c.senha_nfse || ''}
-                      placeholder="Senha do portal"
-                      autoComplete="new-password"
-                      onChange={(e) => editar(c._idx, 'senha_nfse', e.target.value)}
-                    />
-                  </td>
-                )}
                 <td>
                   <div className="clientes-row-actions">
-                    <button
-                      type="button"
-                      className="btn-row-move"
-                      onClick={() => editar(
-                        c._idx,
-                        'tipo_login',
-                        tipoAba === 'certificado' ? 'usuario_senha' : 'certificado',
-                      )}
-                      title={`Mover para clientes ${tipoAba === 'certificado' ? 'com usuário e senha' : 'com certificado'}`}
-                    >
-                      {tipoAba === 'certificado' ? '→ Usuário' : '→ Certificado'}
-                    </button>
                     <button
                       type="button"
                       className="btn-row-remove"
@@ -1482,7 +1389,7 @@ function ClientesPage({ api, toast }) {
       </div>
 
       <div className="clientes-count">
-        Total geral: {clientes.length} cliente(s) · {totalCertificado} com certificado · {totalUsuarioSenha} com usuário e senha
+        Total: {clientes.length} cliente(s) com certificado digital
       </div>
     </div>
   );

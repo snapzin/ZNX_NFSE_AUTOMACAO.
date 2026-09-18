@@ -322,8 +322,13 @@ def iter_documentos(
         if cancelar and cancelar():
             return
         batch, status = _fetch_lote(session, nsu, cnpj_consulta)
-        if status == 404 or batch is None:
+        if status == 404:
             return
+        if batch is None:
+            # Erro de autenticacao/rede nao significa caixa vazia ou completa.
+            # baixar_dfe propaga isso em ResultadoADN.erro ao orquestrador.
+            detalhe = f"HTTP {status}" if status else "rede/limite de tentativas"
+            raise RuntimeError(f"Consulta ADN interrompida ({detalhe}); nao foi possivel conferir todos os documentos.")
         lote = batch.get("LoteDFe") or []
         if batch.get("StatusProcessamento") == "NENHUM_DOCUMENTO_LOCALIZADO" or not lote:
             return

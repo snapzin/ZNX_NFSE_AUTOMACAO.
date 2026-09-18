@@ -36,6 +36,7 @@ except ImportError:
     import config
 apply_defaults(config)
 from app.automation.cert_reader import CertificadoInfo, indexar_certificados_por_cnpj, listar_certificados
+from app.automation.clientes import clientes_por_certificado
 
 
 logging.basicConfig(
@@ -137,17 +138,6 @@ class NFSeRunner:
             nome_pasta = f"{nome_pasta} - {doc}"
         output_dir = self.base_output / nome_pasta
         output_dir.mkdir(parents=True, exist_ok=True)
-        from app.automation.portal_auth import credenciais_para, validar_login_portal
-        dados_login = {
-            "tipo_login": cliente.tipo_login,
-            "usuario_nfse": cliente.usuario_nfse,
-            "senha_nfse": cliente.senha_nfse,
-        }
-        credenciais = credenciais_para(config, cliente.cnpj, dados_login)
-        if credenciais.tipo_login == "usuario_senha":
-            log.info("[%s] Validando acesso ao portal por usuario/senha.", cliente.cnpj)
-            validar_login_portal(config, cliente.cnpj, dados_login)
-            log.info("[%s] Login por usuario/senha confirmado.", cliente.cnpj)
         return _baixar_cliente_adn(cert, cliente, params, output_dir, self.cancel_event)
 
 def _normalizar_cnpj(value: str) -> str:
@@ -297,7 +287,7 @@ def preparar_parametros(
         clientes_dados = {}
         clientes_lista = []
         identidades_vistas: set[tuple[str, str]] = set()
-        for c in clientes:
+        for c in clientes_por_certificado(clientes):
             if not isinstance(c, dict):
                 continue
             doc = _normalizar_cnpj(str(c.get("documento", "")))
@@ -516,9 +506,7 @@ def executar_local(
     if params.cnpjs:
         alvos_clientes = [dados_alvo(cnpj) for cnpj in params.cnpjs]
     elif params.clientes_lista:
-        # Preserva duas entradas do mesmo documento quando elas pertencem a
-        # formas de acesso diferentes. A execucao continua sequencial.
-        alvos_clientes = [dict(cliente) for cliente in params.clientes_lista]
+        alvos_clientes = clientes_por_certificado(params.clientes_lista)
     elif clientes_xlsx:
         # XLSX como filtro; inclui tambem CNPJs com cert duplicado (resolvidos adiante)
         alvos_clientes = [dados_alvo(cnpj) for cnpj in sorted(clientes_xlsx.keys())]

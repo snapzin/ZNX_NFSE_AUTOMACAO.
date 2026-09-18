@@ -813,6 +813,9 @@ def _ler_credenciais_locais() -> dict:
 
 
 def _salvar_credenciais_locais(clientes: list[dict]) -> None:
+    # A interface por certificado nao edita nem apaga credenciais legadas.
+    if not any(c.get("usuario_nfse") or c.get("senha_nfse") for c in clientes or []):
+        return
     dados = {}
     for c in clientes or []:
         doc = re.sub(r"\D", "", str(c.get("documento", "")))
@@ -1139,30 +1142,14 @@ async def license_deactivate_endpoint():
     return {"ok": True}
 
 
-def _filtrar_clientes_por_login(todos_clientes: list[dict], tipo_login: str) -> list[dict]:
-    """Seleciona clientes ativos conforme a escolha feita na tela Executar."""
-    tipo_login = str(tipo_login or "").strip().lower()
-    if tipo_login not in ("certificado", "usuario_senha", "ambos"):
-        raise HTTPException(
-            status_code=400,
-            detail="Escolha o tipo de cliente: certificado, usuario e senha ou ambos.",
-        )
-    clientes_exec = [c for c in todos_clientes if c.get("ativo", True)]
+def _filtrar_clientes_por_login(todos_clientes: list[dict], tipo_login: str = "") -> list[dict]:
+    """Aceita payloads legados, mas executa apenas com certificado digital."""
+    from app.automation.clientes import clientes_por_certificado
+    clientes_exec = [c for c in clientes_por_certificado(todos_clientes) if c["ativo"]]
     if todos_clientes and not clientes_exec:
         raise HTTPException(
             status_code=400,
             detail="Nenhum cliente selecionado. Marque ao menos um cliente na aba Clientes.",
-        )
-    if tipo_login != "ambos":
-        clientes_exec = [
-            c for c in clientes_exec
-            if str(c.get("tipo_login", "certificado")) == tipo_login
-        ]
-    if (todos_clientes or tipo_login == "usuario_senha") and not clientes_exec:
-        descricao = "com certificado digital" if tipo_login == "certificado" else "com usuario e senha"
-        raise HTTPException(
-            status_code=400,
-            detail=f"Nenhum cliente ativo {descricao} foi encontrado na aba Clientes.",
         )
     return clientes_exec
 

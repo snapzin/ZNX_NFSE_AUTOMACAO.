@@ -13,7 +13,7 @@ from app.automation.nfse_automacao import executar_local, preparar_parametros
 
 
 class TestClientesCredenciais(unittest.TestCase):
-    def test_filtro_de_execucao_por_tipo_de_login(self):
+    def test_todos_os_modos_legados_usam_certificado(self):
         clientes = [
             {"documento": "1", "tipo_login": "certificado", "ativo": True},
             {"documento": "2", "tipo_login": "usuario_senha", "ativo": True},
@@ -22,11 +22,11 @@ class TestClientesCredenciais(unittest.TestCase):
         certificados = server._filtrar_clientes_por_login(clientes, "certificado")
         usuarios = server._filtrar_clientes_por_login(clientes, "usuario_senha")
         ambos = server._filtrar_clientes_por_login(clientes, "ambos")
-        self.assertEqual([c["documento"] for c in certificados], ["1"])
-        self.assertEqual([c["documento"] for c in usuarios], ["2"])
+        self.assertEqual([c["documento"] for c in certificados], ["1", "2"])
+        self.assertEqual([c["documento"] for c in usuarios], ["1", "2"])
         self.assertEqual([c["documento"] for c in ambos], ["1", "2"])
 
-    def test_mesmo_documento_e_separado_pelo_tipo_de_login(self):
+    def test_mesmo_documento_e_executado_uma_vez_com_certificado(self):
         documento = "12345678000100"
         clientes = [
             {"documento": documento, "tipo_login": "certificado", "ativo": True},
@@ -36,12 +36,11 @@ class TestClientesCredenciais(unittest.TestCase):
         usuarios = server._filtrar_clientes_por_login(clientes, "usuario_senha")
         ambos = server._filtrar_clientes_por_login(clientes, "ambos")
         self.assertEqual([c["tipo_login"] for c in certificados], ["certificado"])
-        self.assertEqual([c["tipo_login"] for c in usuarios], ["usuario_senha"])
-        self.assertEqual(len(ambos), 2)
+        self.assertEqual([c["tipo_login"] for c in usuarios], ["certificado"])
+        self.assertEqual(len(ambos), 1)
 
-    def test_tipo_de_execucao_e_obrigatorio(self):
-        with self.assertRaises(HTTPException):
-            server._filtrar_clientes_por_login([], "")
+    def test_execucao_nao_exige_escolher_tipo_login(self):
+        self.assertEqual(server._filtrar_clientes_por_login([], ""), [])
 
     def test_normalizacao_preserva_tipo_usuario_e_senha(self):
         cliente = server._normalizar_clientes([{
@@ -142,7 +141,7 @@ class TestClientesCredenciais(unittest.TestCase):
         self.assertEqual(carregados[1]["senha_nfse"], "segredo")
 
     def test_falha_ao_gravar_credenciais_nao_e_ocultada(self):
-        cliente = {"documento": "12345678000100", "tipo_login": "usuario_senha"}
+        cliente = {"documento": "12345678000100", "tipo_login": "usuario_senha", "senha_nfse": "segredo"}
         with TemporaryDirectory() as pasta:
             xlsx = Path(pasta) / "clientes.xlsx"
             with (
@@ -172,10 +171,10 @@ class TestClientesCredenciais(unittest.TestCase):
             "senha_nfse": "segredo",
         }])
         dados = params.clientes_dados["12345678000100"]
-        self.assertEqual(dados["tipo_login"], "usuario_senha")
-        self.assertEqual(dados["senha_nfse"], "segredo")
+        self.assertEqual(dados["tipo_login"], "certificado")
+        self.assertEqual(dados["senha_nfse"], "")
 
-    def test_ambos_executa_mesmo_documento_uma_vez_por_forma_de_acesso(self):
+    def test_cadastro_legado_duplicado_executa_so_uma_vez(self):
         documento = "12345678000100"
         params = preparar_parametros(clientes=[
             {
@@ -204,7 +203,7 @@ class TestClientesCredenciais(unittest.TestCase):
         ):
             executar_local(params)
         tipos = [chamada.args[0].tipo_login for chamada in processar.call_args_list]
-        self.assertEqual(tipos, ["certificado", "usuario_senha"])
+        self.assertEqual(tipos, ["certificado"])
 
     def test_senha_nao_e_enviada_ao_servidor_remoto(self):
         enviados = {}

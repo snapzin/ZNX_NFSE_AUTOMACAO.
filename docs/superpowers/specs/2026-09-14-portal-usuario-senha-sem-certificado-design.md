@@ -1,7 +1,7 @@
 # Fluxo NFS-e por usuario e senha sem certificado
 
 Data: 14/09/2026  
-Status: aprovado em conversa; aguardando revisao final da especificacao
+Status: substituido em 17/09/2026 por solicitacao do usuario: acesso somente por certificado digital. Este desenho permanece apenas como historico e nao deve ser implementado.
 
 ## Problema
 

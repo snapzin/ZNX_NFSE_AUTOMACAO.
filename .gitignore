@@ -23,6 +23,9 @@ electron/dist/
 *.blockmap
 # Instaladores/pacotes gerados (grandes demais para o GitHub: limite 100 MB)
 *.zip
+*.pfx
+*.p12
+*.pem
 NFSe-Automacao-Setup-*.zip
 
 # ── SEGREDOS — nunca commitar ─────────────────────────────────────
