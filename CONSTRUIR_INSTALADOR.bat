@@ -84,15 +84,13 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 
-REM Copiar config.py para dentro da pasta do server.exe
-copy /y "config.py" "dist\server\config.py" >nul
+REM Gerar configuracao limpa: nunca copiar caminhos, credenciais ou tokens locais.
+"%PYEXE%" tools\criar_config_distribuicao.py "dist\server\config.py"
 if errorlevel 1 (
-    echo [AVISO] Nao foi possivel copiar config.py para dist\server\
+    echo [ERRO] Nao foi possivel gerar o config.py limpo de distribuicao.
+    pause & exit /b 1
 )
-REM SEGURANCA: nunca distribuir o token admin. Zera LICENSE_ADMIN_TOKEN no
-REM config.py empacotado (o admin seta na propria maquina apos instalar).
-powershell -NoProfile -Command "(Get-Content 'dist\server\config.py') -replace '^LICENSE_ADMIN_TOKEN\s*=.*', \"LICENSE_ADMIN_TOKEN = ''\" | Set-Content 'dist\server\config.py' -Encoding UTF8"
-echo       OK - dist\server\server.exe gerado (token admin removido do pacote)
+echo       OK - dist\server\server.exe gerado (configuracao local nao incluida)
 echo.
 
 REM ════════════════════════════════════════════════════════════════

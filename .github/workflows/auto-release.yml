@@ -47,10 +47,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -v
           python -m PyInstaller api\server.spec --noconfirm --clean
-          Copy-Item -Path config.py -Destination dist\server\config.py -Force
-          (Get-Content dist\server\config.py) `
-            -replace '^LICENSE_ADMIN_TOKEN\s*=.*', "LICENSE_ADMIN_TOKEN = ''" |
-            Set-Content dist\server\config.py -Encoding UTF8
+          python tools\criar_config_distribuicao.py dist\server\config.py
 
       - name: Setup Node
         uses: actions/setup-node@v4

@@ -20,9 +20,11 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
+from decimal import Decimal, InvalidOperation
 from xml.etree import ElementTree as ET
 
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
@@ -63,7 +65,38 @@ _CAMPOS = [
     ("Chave de Acesso",   46, "chave",        "txt"),
     ("Arquivo",           38, "arquivo",      "txt"),
 ]
-_MONEY = [c[2] for c in _CAMPOS if c[3] == "money"]
+_CAMPOS_CONFERENCIA = [
+    ("Descricao contrib. sociais retidas", 49, "descricaoRetSociais", "txt"),
+    ("ISS Retido (valor)", 18, "vISSRetido", "money"),
+    ("Total Retencoes XML", 21, "vTotalRetXML", "money"),
+    ("Conferencia Retencoes", 85, "conferenciaRetencoes", "txt"),
+]
+_MONEY = [c[2] for c in _CAMPOS + _CAMPOS_CONFERENCIA if c[3] == "money"]
+# NT 007/2026: vRetCSLL agrega contribuicoes sociais retidas. vPis/vCofins
+# representam debitos de apuracao propria, e nao devem ser somados novamente
+# ao total retido. As posicoes monetarias originais sao mantidas.
+_ROTULOS_TRIBUTOS = {
+    "vPis": ("PIS - Apuracao propria", 25),
+    "vCofins": ("COFINS - Apuracao propria", 28),
+    "vRetCSLL": ("Contrib. sociais retidas (PIS/COFINS/CSLL)", 42),
+}
+_RETENCOES_SOCIAIS = {
+    "0": "PIS/COFINS/CSLL Nao Retidos",
+    "1": "PIS/COFINS Retido",
+    "2": "PIS/COFINS Nao Retido",
+    "3": "PIS/COFINS/CSLL Retidos",
+    "4": "PIS/COFINS Retidos, CSLL Nao Retido",
+    "5": "PIS Retido, COFINS/CSLL Nao Retido",
+    "6": "COFINS Retido, PIS/CSLL Nao Retido",
+    "7": "PIS Nao Retido, COFINS/CSLL Retidos",
+    "8": "PIS/COFINS Nao Retidos, CSLL Retido",
+    "9": "COFINS Nao Retido, PIS/CSLL Retidos",
+}
+_NOTA_CONTRIBUICOES = (
+    "Campo vRetCSLL do XML: contribuicoes sociais retidas (PIS, COFINS e/ou CSLL), "
+    "conforme tpRetPisCofins e NT 007/2026. O XML nao discrimina as parcelas "
+    "dessa soma. PIS/COFINS de apuracao propria nao sao somados novamente."
+)
 # Impostos mostrados no Resumo (rotulo -> chave)
 _RESUMO_IMPOSTOS = [
     ("Valor Servico", "vServ"), ("Base Calculo", "vBC"), ("Valor ISS", "vISSQN"),
@@ -71,6 +104,8 @@ _RESUMO_IMPOSTOS = [
     ("CSLL", "vRetCSLL"), ("INSS/CP", "vRetCP"),
     ("Total Retencoes", "vTotalRet"), ("Valor Liquido", "vLiq"),
 ]
+_RESUMO_IMPOSTOS = [(_ROTULOS_TRIBUTOS.get(k, (rot, 0))[0], k)
+                    for rot, k in _RESUMO_IMPOSTOS]
 
 
 # parsing do XML
@@ -103,6 +138,13 @@ def _bloco(root, *nomes: str):
         if _localname(el.tag).lower() in alvo:
             return el
     return None
+
+
+def _filho(root, nome: str):
+    """Filho direto: impede confundir valores do ISS com IBSCBS/valores."""
+    if root is None:
+        return None
+    return next((el for el in root if _localname(el.tag) == nome), None)
 
 
 def normalizar_iss_retido(valor: object) -> str:
@@ -147,6 +189,62 @@ def _sanitizar(nome: str) -> str:
     return _INVALIDO.sub("", nome or "").strip(". ")[:80] or "cliente"
 
 
+def _conferir_retencoes(nota: dict, valores, valores_dps, federal, codigo_iss: str,
+                       codigo_sociais: str) -> None:
+    """Ajuste restrito: ISS nao retido indevido, confirmado tambem pelo liquido.
+
+    Outras divergencias nao autorizam inventar valores fiscais. O total original
+    permanece disponivel; casos ambiguos exigem conferencia, inclusive o legado.
+    """
+    def decimal_xml(bloco, tag, obrigatorio=False):
+        texto = _txt(bloco, tag)
+        if not texto and obrigatorio:
+            raise ValueError(tag)
+        valor = Decimal(texto or '0')
+        if not valor.is_finite() or valor < 0:
+            raise ValueError(tag)
+        return valor
+
+    nota['vISSRetido'] = nota['vISSQN'] if codigo_iss in {'2', '3'} else (0 if codigo_iss == '1' else None)
+    nota['vTotalRetXML'] = None
+    nota['conferenciaRetencoes'] = 'CONFERIR: dados fiscais ausentes ou invalidos; total nao ajustado'
+    try:
+        total = decimal_xml(valores, 'vTotalRet')
+        nota['vTotalRetXML'] = float(total) if _txt(valores, 'vTotalRet') else None
+    except (InvalidOperation, ValueError):
+        nota['vTotalRet'] = None
+        return
+    try:
+        iss = decimal_xml(valores, 'vISSQN')
+        federal_retido = sum(decimal_xml(federal, k) for k in ('vRetIRRF', 'vRetCSLL', 'vRetCP'))
+        servico = decimal_xml(valores_dps, 'vServ', obrigatorio=True)
+        descontos = sum(decimal_xml(valores_dps, k) for k in ('vDescIncond', 'vDescCond'))
+        liquido = decimal_xml(valores, 'vLiq', obrigatorio=True)
+        pis_cofins = sum(decimal_xml(federal, k) for k in ('vPis', 'vCofins'))
+    except (InvalidOperation, ValueError):
+        return
+    if codigo_iss not in {'1', '2', '3'}:
+        nota['conferenciaRetencoes'] = 'CONFERIR: indicador de ISS ausente/desconhecido; total nao ajustado'
+        return
+    if (codigo_sociais == '1' and pis_cofins > 0) or (
+        codigo_sociais and codigo_sociais not in _RETENCOES_SOCIAIS
+    ):
+        nota['conferenciaRetencoes'] = 'CONFERIR: dominio de contribuicoes legado/ambiguo; total nao ajustado'
+        return
+    if codigo_sociais == '0' and decimal_xml(federal, 'vRetCSLL') > 0:
+        nota['conferenciaRetencoes'] = 'CONFERIR: contribuicoes declaradas sem retencao, mas com valor retido'
+        return
+    esperado = federal_retido + (iss if codigo_iss in {'2', '3'} else Decimal('0'))
+    if total == esperado and liquido == servico - descontos - esperado:
+        nota['conferenciaRetencoes'] = 'OK'
+    elif (codigo_iss == '1' and iss > 0 and total == esperado + iss
+          and liquido == servico - descontos - esperado):
+        nota['vTotalRet'] = float(esperado)
+        nota['conferenciaRetencoes'] = 'AJUSTADO: ISS nao retido excluido do total; valor original na coluna Total Retencoes XML'
+    else:
+        nota['conferenciaRetencoes'] = 'CONFERIR: total/liquido diverge das retencoes discriminadas; valor XML preservado'
+
+
 def extrair_nota(xml_path: Path, situacao: str = "") -> dict | None:
     """Le um XML de NFS-e e devolve um dict {chave_do_campo: valor} com todos
     os campos fiscais do relatorio. None se nao parsear."""
@@ -161,7 +259,17 @@ def extrair_nota(xml_path: Path, situacao: str = "") -> dict | None:
     emi = _txt(root, "dhEmi", "dhProc", "dhEvento")
     chave = (inf.get("Id") if inf is not None else "") or ""
     tp_ret_iss = _txt(root, "tpRetISSQN")
-    return {
+    valores_nfse = _filho(inf, "valores")
+    # XML nacional: ISS e totais pertencem a infNFSe/valores. O mesmo nome
+    # vBC tambem existe em infNFSe/IBSCBS/valores, sem representar base de ISS.
+    valores_iss = valores_nfse if inf is not None else root
+    federal = _bloco(root, "tribFed")
+    codigo_ret_sociais = _txt(federal, "tpRetPisCofins")
+    descricao_ret_sociais = (
+        f"{codigo_ret_sociais} - {_RETENCOES_SOCIAIS.get(codigo_ret_sociais, 'Codigo nao reconhecido')}"
+        if codigo_ret_sociais else "Nao informado"
+    )
+    nota = {
         "numero": _txt(root, "nNFSe", "nDPS"),
         "competencia": compet[:7] if compet else (emi[:7] if emi else ""),
         "emissao": emi[:10] if emi else "",
@@ -176,21 +284,26 @@ def extrair_nota(xml_path: Path, situacao: str = "") -> dict | None:
         "vDescIncond": _num(root, "vDescIncond"),
         "vDescCond": _num(root, "vDescCond"),
         "vDR": _num(root, "vDR"),
-        "vBC": _num(root, "vBC"),
-        "pAliqAplic": _num(root, "pAliqAplic"),
-        "vISSQN": _num(root, "vISSQN"),
+        "vBC": _num(valores_iss, "vBC"),
+        "pAliqAplic": _num(valores_iss, "pAliqAplic"),
+        "vISSQN": _num(valores_iss, "vISSQN"),
         "issRetido": normalizar_iss_retido(tp_ret_iss),
         "vPis": _num(root, "vPis"),
         "vCofins": _num(root, "vCofins"),
         "vRetIRRF": _num(root, "vRetIRRF"),
         "vRetCSLL": _num(root, "vRetCSLL"),
         "vRetCP": _num(root, "vRetCP"),
-        "vTotalRet": _num(root, "vTotalRet"),
-        "vLiq": _num(root, "vLiq"),
+        "vTotalRet": _num(valores_iss, "vTotalRet"),
+        "vLiq": _num(valores_iss, "vLiq"),
+        "descricaoRetSociais": descricao_ret_sociais,
         "situacao": situacao or "Normal",
         "chave": re.sub(r"\D", "", chave),
         "arquivo": xml_path.name,
     }
+    dps = _bloco(root, 'infDPS')
+    valores_dps = _filho(dps, 'valores') if dps is not None else root
+    _conferir_retencoes(nota, valores_iss, valores_dps, federal, tp_ret_iss, codigo_ret_sociais)
+    return nota
 
 
 # montagem do Excel
@@ -206,39 +319,53 @@ _VERDE, _VERMELHO = "1E7D34", "C00000"
 def _escrever_aba(ws, notas: list[dict]) -> dict:
     """Preenche uma aba com as notas (detalhadas) + linha de TOTAL.
     Retorna {qtd, <chave_money>: soma, ...}."""
-    rotulos = [c[0] for c in _CAMPOS]
+    campos = [(*_ROTULOS_TRIBUTOS.get(k, (rot, larg)), k, t)
+              for rot, larg, k, t in _CAMPOS] + _CAMPOS_CONFERENCIA
+    rotulos = [c[0] for c in campos]
     ws.append(rotulos)
-    for ci, (rot, larg, _k, _t) in enumerate(_CAMPOS, start=1):
+    for ci, (rot, larg, _k, _t) in enumerate(campos, start=1):
         cell = ws.cell(row=1, column=ci)
         cell.fill = _HDR_FILL
         cell.font = _HDR_FONT
         cell.alignment = Alignment(horizontal="center")
         ws.column_dimensions[get_column_letter(ci)].width = larg
+        if _k == "vRetCSLL":
+            cell.comment = Comment(_NOTA_CONTRIBUICOES, "NFSe")
+        elif _k in {"vPis", "vCofins"}:
+            cell.comment = Comment("Debito de apuracao propria, nao valor retido. Nao somar ao Total Retencoes.", "NFSe")
+        elif _k == "vTotalRet":
+            cell.comment = Comment("Total com conferencia de retencoes. Ajustes e divergencias constam nas colunas finais; o XML original e o valor liquido sao preservados.", "NFSe")
 
-    tot = {"qtd": 0}
+    tot = {"qtd": 0, "retencoesAjustadas": 0, "retencoesConferir": 0}
     for k in _MONEY:
         tot[k] = 0.0
     for nota in notas:
-        ws.append([nota.get(c[2], "") for c in _CAMPOS])
+        ws.append([nota.get(c[2], "") for c in campos])
+        status_retencoes = nota.get('conferenciaRetencoes', '')
+        tot['retencoesAjustadas'] += int(status_retencoes.startswith('AJUSTADO'))
+        tot['retencoesConferir'] += int(status_retencoes.startswith('CONFERIR'))
+        if nota.get('conferenciaRetencoes', 'OK') != 'OK':
+            for ci in (24, 31, 32):
+                ws.cell(ws.max_row, ci).fill = PatternFill('solid', fgColor='FFF2CC')
         tot["qtd"] += 1
         for k in _MONEY:
             tot[k] += float(nota.get(k) or 0)
 
     # formato numerico nas colunas de valor/percentual
-    fmt_idx = [(i + 1, c[3]) for i, c in enumerate(_CAMPOS) if c[3] in ("money", "pct")]
+    fmt_idx = [(i + 1, c[3]) for i, c in enumerate(campos) if c[3] in ("money", "pct")]
     for r in range(2, ws.max_row + 1):
         for ci, _t in fmt_idx:
             ws.cell(row=r, column=ci).number_format = "#,##0.00"
 
     # linha TOTAL
-    linha = [""] * len(_CAMPOS)
+    linha = [""] * len(campos)
     linha[0] = f"TOTAL ({tot['qtd']})"
-    for i, c in enumerate(_CAMPOS):
+    for i, c in enumerate(campos):
         if c[3] == "money":
             linha[i] = tot[c[2]]
     ws.append(linha)
     rt = ws.max_row
-    for ci in range(1, len(_CAMPOS) + 1):
+    for ci in range(1, len(campos) + 1):
         ws.cell(row=rt, column=ci).fill = _TOT_FILL
         ws.cell(row=rt, column=ci).font = _TOT_FONT
     for ci, _t in fmt_idx:
@@ -315,12 +442,14 @@ def _montar_resumo(wb: Workbook, resumo: ResumoCliente) -> None:
         ws["A2"] = f"CNPJ: {resumo.cnpj}"
     ws.append([])
 
-    cab = ["Tipo", "Qtd"] + [r[0] for r in _RESUMO_IMPOSTOS]
+    cab = ["Tipo", "Qtd"] + [rotulo for rotulo, chave in _RESUMO_IMPOSTOS]
     ws.append(cab)
     hr = ws.max_row
     for ci in range(1, len(cab) + 1):
         ws.cell(row=hr, column=ci).fill = _HDR_FILL
         ws.cell(row=hr, column=ci).font = _HDR_FONT
+        if cab[ci - 1] == _ROTULOS_TRIBUTOS['vRetCSLL'][0]:
+            ws.cell(row=hr, column=ci).comment = Comment(_NOTA_CONTRIBUICOES, "NFSe")
     for tipo in TIPOS:
         t = resumo.totais.get(tipo)
         if not t:
@@ -333,6 +462,18 @@ def _montar_resumo(wb: Workbook, resumo: ResumoCliente) -> None:
     ws.column_dimensions["B"].width = 7
     for ci in range(3, len(cab) + 1):
         ws.column_dimensions[get_column_letter(ci)].width = 15
+        if cab[ci - 1] in {v[0] for v in _ROTULOS_TRIBUTOS.values()}:
+            ws.column_dimensions[get_column_letter(ci)].width = 42
+
+    ws.append([])
+    ws.append(['Conferencia fiscal das retencoes (independente da completude do download)'])
+    for rotulo, chave in (('Notas com retencoes ajustadas', 'retencoesAjustadas'),
+                          ('Notas com retencoes a conferir', 'retencoesConferir')):
+        quantidade = sum(t.get(chave, 0) for t in resumo.totais.values())
+        ws.append([rotulo, quantidade])
+        if quantidade:
+            ws.cell(ws.max_row, 1).fill = PatternFill('solid', fgColor='FFF2CC')
+    ws.append(['Consulte Total Retencoes XML e Conferencia Retencoes nas abas detalhadas.'])
 
     # Bloco CONFERENCIA (completude por NSU) — veredito BATEU / NAO BATEU
     if resumo.conferencia:
@@ -364,7 +505,7 @@ def gerar_consolidado(base_saida: Path, resumos: list[ResumoCliente]) -> Path | 
 
     cab = ["Cliente", "CNPJ", "Emit Qtd", "Emit Valor", "Receb Qtd", "Receb Valor",
            "Canc Qtd", "Canc Valor", "Total Notas", "Total Servico",
-           "Total ISS", "Total Retencoes", "Conferencia"]
+           "Total ISS", "Total Retencoes", "Conferencia", "Retencoes a conferir"]
     ws.append(cab)
     hr = ws.max_row
     for ci in range(1, len(cab) + 1):
@@ -391,13 +532,15 @@ def gerar_consolidado(base_saida: Path, resumos: list[ResumoCliente]) -> Path | 
         verdito = "BATEU" if completo else f"NAO BATEU ({falt} NSU)"
         if not completo:
             divergentes += 1
-        ws.append([r.nome, r.cnpj, e_q, e_v, r_q, r_v, c_q, c_v, tot_q, tot_v, iss, ret, verdito])
-        cv = ws.cell(row=ws.max_row, column=len(cab))
+        pendencias = sum(t.get('retencoesConferir', 0) for t in r.totais.values())
+        ws.append([r.nome, r.cnpj, e_q, e_v, r_q, r_v, c_q, c_v, tot_q, tot_v, iss, ret, verdito, pendencias])
+        cv = ws.cell(row=ws.max_row, column=13)
         cv.font = Font(bold=True, color="FFFFFF")
         cv.fill = PatternFill("solid", fgColor=(_VERDE if completo else _VERMELHO))
 
     ws.append(["TOTAL GERAL", "", "", "", "", "", "", "", soma["qtd"], soma["serv"], "", "",
-               "TODOS OK" if divergentes == 0 else f"{divergentes} divergente(s)"])
+               "TODOS OK" if divergentes == 0 else f"{divergentes} divergente(s)",
+               sum(t.get('retencoesConferir', 0) for r in resumos for t in r.totais.values())])
     rt = ws.max_row
     for ci in range(1, len(cab) + 1):
         ws.cell(row=rt, column=ci).fill = _TOT_FILL
@@ -406,7 +549,7 @@ def gerar_consolidado(base_saida: Path, resumos: list[ResumoCliente]) -> Path | 
     for r in range(hr + 1, ws.max_row + 1):
         for ci in (4, 6, 8, 10, 11, 12):
             ws.cell(row=r, column=ci).number_format = "#,##0.00"
-    for ci, larg in enumerate((34, 18, 9, 14, 9, 14, 9, 14, 11, 15, 14, 15, 20), start=1):
+    for ci, larg in enumerate((34, 18, 9, 14, 9, 14, 9, 14, 11, 15, 14, 15, 20, 24), start=1):
         ws.column_dimensions[get_column_letter(ci)].width = larg
     ws.freeze_panes = "A4"
 

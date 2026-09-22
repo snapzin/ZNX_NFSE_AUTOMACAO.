@@ -1121,7 +1121,7 @@ function SobrePage() {
       >
         <h1>NFSe</h1>
         <h2>Automacao</h2>
-        <p className="version">Versao 2.3</p>
+        <p className="version">Versao 2.4.1033</p>
         <p className="description">
           Automatiza o download de NFSe para multiplos clientes via Playwright local.
         </p>
