@@ -371,11 +371,16 @@ def baixar_dfe(
       competencias  : se dado, salva so docs cuja competencia (YYYY-MM) esteja no conjunto.
       tipos         : subconjunto de {"Emitidas","Recebidas","Canceladas"} a salvar.
                       None = todos.
-      cnpj_consulta : consulta de filial/terceiro (matriz->filial). "" = a propria caixa.
+      cnpj_consulta : consulta de filial/terceiro (matriz->filial). "" = a propria caixa
+                      (o CNPJ do dono e enviado automaticamente, exigido pelo ADN).
       nsu_inicial   : retomar a partir de um NSU (sync incremental). 0 = caixa inteira.
     """
     res = ResultadoADN()
     owner = _so_digitos(owner_cnpj)
+    # O ADN passou a rejeitar (HTTP 400 REJEICAO) a consulta sem cnpjConsulta;
+    # na propria caixa, enviamos o CNPJ do dono.
+    if not cnpj_consulta and len(owner) == 14:
+        cnpj_consulta = owner
     cert_pem, key_pem = pfx_para_pem(Path(cert_path), senha)
 
     # `requests` precisa de arquivos para o cert mTLS — gravamos cert+chave em

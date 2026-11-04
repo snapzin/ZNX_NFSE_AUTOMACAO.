@@ -20,3 +20,10 @@ class TestFalhasADN(unittest.TestCase):
             self.assertEqual(next(documentos)['NSU'], 1)
             with self.assertRaises(RuntimeError):
                 next(documentos)
+
+    def test_propria_caixa_envia_cnpj_consulta_exigido_pelo_adn(self):
+        from app.automation.adn_client import baixar_dfe
+        with patch('app.automation.adn_client.pfx_para_pem', return_value=(b'c', b'k')), \
+                patch('app.automation.adn_client.iter_documentos', return_value=iter([])) as itera:
+            baixar_dfe('x.pfx', '', '12.345.678/0001-95', 'saida')
+        self.assertEqual(itera.call_args.args[1], '12345678000195')
